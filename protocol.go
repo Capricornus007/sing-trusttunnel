@@ -14,8 +14,9 @@ import (
 const (
 	Version = "v0.0.2"
 
-	UDPMagicAddress  = "_udp2"
-	ICMPMagicAddress = "_icmp"
+	UDPMagicAddress         = "_udp2"
+	ICMPMagicAddress        = "_icmp"
+	HealthCheckMagicAddress = "_check"
 
 	DefaultQuicStreamReceiveWindow = 131072 // Chrome's default
 	DefaultConnectionTimeout       = 30 * time.Second
@@ -37,6 +38,8 @@ var (
 	// ICMPUserAgent is user-agent for ICMP multiplexing.
 	// Format: <platform> _icmp
 	ICMPUserAgent = runtime.GOOS + " " + ICMPMagicAddress
+
+	HealthCheckUserAgent = runtime.GOOS
 )
 
 var ErrQUICNotIncluded = E.New("QUIC is not included")

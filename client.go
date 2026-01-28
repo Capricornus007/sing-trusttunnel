@@ -178,6 +178,46 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	return conn, nil
 }
 
+func (c *Client) ListenICMP(ctx context.Context) (*IcmpConn, error) {
+	pipeReader, pipeWriter := io.Pipe()
+	request := &http.Request{
+		Method: http.MethodConnect,
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   ICMPMagicAddress,
+		},
+		Header: make(http.Header),
+		Body:   pipeReader,
+		Host:   ICMPMagicAddress,
+	}
+	request.Header.Add("User-Agent", ICMPMagicAddress)
+	request.Header.Add("Proxy-Authorization", c.auth)
+	conn := &IcmpConn{
+		httpConn{
+			pipeWriter: pipeWriter,
+			wrapError:  c.wrapError,
+			created:    make(chan struct{}),
+		},
+	}
+	go func() {
+		response, err := c.roundTripper.RoundTrip(request.WithContext(ctx))
+		if err != nil {
+			err = c.wrapError(err)
+			_ = pipeWriter.CloseWithError(err)
+			_ = pipeReader.CloseWithError(err)
+			conn.setUp(nil, err)
+		} else if response.StatusCode != http.StatusOK {
+			err = E.New("unexpected status code: ", response.StatusCode)
+			_ = pipeWriter.CloseWithError(err)
+			_ = pipeReader.CloseWithError(err)
+			conn.setUp(nil, err)
+		} else {
+			conn.setUp(response.Body, nil)
+		}
+	}()
+	return conn, nil
+}
+
 func (c *Client) Close() error {
 	c.roundTripper.CloseIdleConnections()
 	return nil
@@ -335,11 +375,11 @@ func (u *udpConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	return
 }
 
-type icmpConn struct {
+type IcmpConn struct {
 	httpConn
 }
 
-func (i *icmpConn) WritePing(id uint16, destination netip.Addr, sequenceNumber uint16, ttl uint8, size uint16) error {
+func (i *IcmpConn) WritePing(id uint16, destination netip.Addr, sequenceNumber uint16, ttl uint8, size uint16) error {
 	request := buf.NewSize(2 + 16 + 2 + 1 + 2)
 	defer request.Release()
 	common.Must(binary.Write(request, binary.BigEndian, id))
@@ -353,7 +393,7 @@ func (i *icmpConn) WritePing(id uint16, destination netip.Addr, sequenceNumber u
 	return err
 }
 
-func (i *icmpConn) ReadPing() (id uint16, sourceAddress netip.Addr, icmpType uint8, code uint8, sequenceNumber uint16, err error) {
+func (i *IcmpConn) ReadPing() (id uint16, sourceAddress netip.Addr, icmpType uint8, code uint8, sequenceNumber uint16, err error) {
 	if i.body == nil {
 		<-i.created
 		if i.createErr != nil {
@@ -376,4 +416,8 @@ func (i *icmpConn) ReadPing() (id uint16, sourceAddress netip.Addr, icmpType uin
 	common.Must(binary.Read(response, binary.BigEndian, &code))
 	common.Must(binary.Read(response, binary.BigEndian, &sequenceNumber))
 	return
+}
+
+func (i *IcmpConn) Close() error {
+	return i.httpConn.Close()
 }
