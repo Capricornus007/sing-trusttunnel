@@ -33,7 +33,7 @@ func (c *Client) quicRoundTripper(tlsConfig tls.Config, congestionControlName st
 			if err != nil {
 				return nil, err
 			}
-			quicConn, err := quic.DialEarly(ctx, packetConn, c.server, tlsCfg, cfg)
+			quicConn, err := quic.DialEarly(ctx, packetConn, c.server.UDPAddr(), tlsCfg, cfg)
 			if err != nil {
 				_ = packetConn.Close()
 				return nil, err
