@@ -2,6 +2,8 @@
 
 package trusttunnel
 
-func (c *Client) quicRoundTripper() error {
+import "github.com/sagernet/sing/common/tls"
+
+func (c *Client) quicRoundTripper(tlsConfig tls.Config, congestionControlName string) error {
 	return ErrQUICNotIncluded
 }

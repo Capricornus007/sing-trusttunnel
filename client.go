@@ -127,6 +127,7 @@ func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, e
 			conn.setUp(nil, err)
 		} else if response.StatusCode != http.StatusOK {
 			err = E.New("unexpected status code: ", response.StatusCode)
+			_ = response.Body.Close()
 			_ = pipeWriter.CloseWithError(err)
 			_ = pipeReader.CloseWithError(err)
 			conn.setUp(nil, err)
@@ -179,6 +180,33 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 
 func (c *Client) Close() error {
 	c.roundTripper.CloseIdleConnections()
+	return nil
+}
+
+func (c *Client) ResetConnections() {
+	c.roundTripper.CloseIdleConnections()
+}
+
+func (c *Client) healthCheck(ctx context.Context) error {
+	request := &http.Request{
+		Method: http.MethodConnect,
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   HealthCheckMagicAddress,
+		},
+		Header: make(http.Header),
+		Host:   HealthCheckMagicAddress,
+	}
+	request.Header.Add("User-Agent", HealthCheckMagicAddress)
+	request.Header.Add("Proxy-Authorization", c.auth)
+	response, err := c.roundTripper.RoundTrip(request.WithContext(ctx))
+	if err != nil {
+		return c.wrapError(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return E.New("unexpected status code: ", response.StatusCode)
+	}
 	return nil
 }
 
@@ -269,15 +297,15 @@ func (u *udpConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 	}
 	var length uint32
 	common.Must(binary.Read(header, binary.BigEndian, &length))
-	var destinationAddress [16]byte
-	common.Must1(header.Read(destinationAddress[:]))
-	var destination M.Socksaddr
-	destination.Addr = parse16BytesIP(destinationAddress)
-	common.Must(binary.Read(header, binary.BigEndian, &destination.Port))
-	common.Must(rw.SkipN(header, 16+2)) // local address:port
+	var sourceAddressBuffer [16]byte
+	common.Must1(header.Read(sourceAddressBuffer[:]))
+	var sourceAddress M.Socksaddr
+	sourceAddress.Addr = parse16BytesIP(sourceAddressBuffer)
+	common.Must(binary.Read(header, binary.BigEndian, &sourceAddress.Port))
+	common.Must(rw.SkipN(header, 16+2)) // To local address:port
 	buffer := buf.With(p)
-	n, err = buffer.ReadFullFrom(u.body, int(length))
-	addr = destination
+	n, err = buffer.ReadFullFrom(u.body, int(length)-(16+2+16+2))
+	addr = sourceAddress.UDPAddr()
 	err = u.wrapError(err)
 	return
 }
@@ -289,7 +317,7 @@ func (u *udpConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	}
 	header := buf.NewSize(4 + 16 + 2 + 16 + 2 + 1 + len(appName))
 	defer header.Release()
-	common.Must(binary.Write(header, binary.BigEndian, uint32(16+2+16+2+1+len(p))))
+	common.Must(binary.Write(header, binary.BigEndian, uint32(16+2+16+2+1+len(appName)+len(p))))
 	common.Must(header.WriteZeroN(16 + 2)) // Source address:port (unknown)
 	destination := M.ParseSocksaddr(addr.String())
 	destinationAddress := buildPaddingIP(destination.Addr)
@@ -311,7 +339,7 @@ type icmpConn struct {
 	httpConn
 }
 
-func (i *icmpConn) WritePing(id uint16, destination netip.Addr, sequenceNumber uint16, ttl uint8, size uint8) error {
+func (i *icmpConn) WritePing(id uint16, destination netip.Addr, sequenceNumber uint16, ttl uint8, size uint16) error {
 	request := buf.NewSize(2 + 16 + 2 + 1 + 2)
 	defer request.Release()
 	common.Must(binary.Write(request, binary.BigEndian, id))
@@ -325,7 +353,7 @@ func (i *icmpConn) WritePing(id uint16, destination netip.Addr, sequenceNumber u
 	return err
 }
 
-func (i *icmpConn) ReadPing() (id uint16, sourceAddress netip.Addr, icmpType uint8, code uint8, sequenceNumber uint8, err error) {
+func (i *icmpConn) ReadPing() (id uint16, sourceAddress netip.Addr, icmpType uint8, code uint8, sequenceNumber uint16, err error) {
 	if i.body == nil {
 		<-i.created
 		if i.createErr != nil {
@@ -340,7 +368,7 @@ func (i *icmpConn) ReadPing() (id uint16, sourceAddress netip.Addr, icmpType uin
 		err = i.wrapError(err)
 		return
 	}
-	common.Must(binary.Read(response, binary.BigEndian, &icmpType))
+	common.Must(binary.Read(response, binary.BigEndian, &id))
 	var sourceAddressBuffer [16]byte
 	common.Must1(response.Read(sourceAddressBuffer[:]))
 	sourceAddress = parse16BytesIP(sourceAddressBuffer)
