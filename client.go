@@ -92,7 +92,8 @@ func (c *Client) h2RoundTripper(tlsConfig tls.Config) {
 			}
 			return tlsConn, nil
 		},
-		AllowHTTP: false,
+		AllowHTTP:       false,
+		IdleConnTimeout: DefaultSessionTimeout,
 	}
 	c.wrapError = baderror.WrapH2
 }

@@ -22,6 +22,7 @@ const (
 	DefaultConnectionTimeout       = 30 * time.Second
 	DefaultHealthCheckTimeout      = 7 * time.Second
 	DefaultQuicMaxIdleTimeout      = 2 * (DefaultConnectionTimeout + DefaultHealthCheckTimeout)
+	DefaultSessionTimeout          = 30 * time.Second
 )
 
 var (
