@@ -32,24 +32,29 @@ type RoundTripper interface {
 }
 
 type ClientOptions struct {
+	Ctx                   context.Context
 	Detour                N.Dialer
 	Server                M.Socksaddr
 	Auth                  auth.User
 	TLSConfig             tls.Config
 	QUIC                  bool
 	QUICCongestionControl string
+	HealthCheck           bool
 }
 
 type Client struct {
-	detour       N.Dialer
-	server       M.Socksaddr
-	auth         string
-	roundTripper RoundTripper
-	wrapError    func(error) error
+	ctx              context.Context
+	detour           N.Dialer
+	server           M.Socksaddr
+	auth             string
+	roundTripper     RoundTripper
+	healthCheckTimer *time.Timer
+	wrapError        func(error) error
 }
 
 func NewClient(options ClientOptions) (client *Client, err error) {
 	client = &Client{
+		ctx:    options.Ctx,
 		detour: options.Detour,
 		server: options.Server,
 		auth:   buildAuth(options.Auth),
@@ -75,6 +80,9 @@ func NewClient(options ClientOptions) (client *Client, err error) {
 		}
 		client.h2RoundTripper(options.TLSConfig)
 	}
+	if options.HealthCheck {
+		client.healthCheckTimer = new(time.Timer)
+	}
 	return client, nil
 }
 
@@ -96,6 +104,35 @@ func (c *Client) h2RoundTripper(tlsConfig tls.Config) {
 		IdleConnTimeout: DefaultSessionTimeout,
 	}
 	c.wrapError = baderror.WrapH2
+}
+
+func (c *Client) Start() error {
+	if c.healthCheckTimer != nil {
+		c.healthCheckTimer = time.NewTimer(DefaultHealthCheckTimeout)
+		go c.loopHealthCheck()
+	}
+	return nil
+}
+
+func (c *Client) loopHealthCheck() {
+	for {
+		select {
+		case <-c.healthCheckTimer.C:
+		case <-c.ctx.Done():
+			c.healthCheckTimer.Stop()
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.ctx, DefaultHealthCheckTimeout)
+		_ = c.HealthCheck(ctx)
+		cancel()
+	}
+}
+
+func (c *Client) resetHealthCheckTimer() {
+	if c.healthCheckTimer == nil {
+		return
+	}
+	c.healthCheckTimer.Reset(DefaultHealthCheckTimeout)
 }
 
 func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, error) {
@@ -127,12 +164,13 @@ func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, e
 			_ = pipeReader.CloseWithError(err)
 			conn.setUp(nil, err)
 		} else if response.StatusCode != http.StatusOK {
-			err = E.New("unexpected status code: ", response.StatusCode)
 			_ = response.Body.Close()
+			err = E.New("unexpected status code: ", response.StatusCode)
 			_ = pipeWriter.CloseWithError(err)
 			_ = pipeReader.CloseWithError(err)
 			conn.setUp(nil, err)
 		} else {
+			c.resetHealthCheckTimer()
 			conn.setUp(response.Body, nil)
 		}
 	}()
@@ -168,11 +206,13 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 			_ = pipeReader.CloseWithError(err)
 			conn.setUp(nil, err)
 		} else if response.StatusCode != http.StatusOK {
+			_ = response.Body.Close()
 			err = E.New("unexpected status code: ", response.StatusCode)
 			_ = pipeWriter.CloseWithError(err)
 			_ = pipeReader.CloseWithError(err)
 			conn.setUp(nil, err)
 		} else {
+			c.resetHealthCheckTimer()
 			conn.setUp(response.Body, nil)
 		}
 	}()
@@ -208,11 +248,13 @@ func (c *Client) ListenICMP(ctx context.Context) (*IcmpConn, error) {
 			_ = pipeReader.CloseWithError(err)
 			conn.setUp(nil, err)
 		} else if response.StatusCode != http.StatusOK {
+			_ = response.Body.Close()
 			err = E.New("unexpected status code: ", response.StatusCode)
 			_ = pipeWriter.CloseWithError(err)
 			_ = pipeReader.CloseWithError(err)
 			conn.setUp(nil, err)
 		} else {
+			c.resetHealthCheckTimer()
 			conn.setUp(response.Body, nil)
 		}
 	}()
@@ -220,15 +262,17 @@ func (c *Client) ListenICMP(ctx context.Context) (*IcmpConn, error) {
 }
 
 func (c *Client) Close() error {
-	c.roundTripper.CloseIdleConnections()
+	c.ResetConnections()
 	return nil
 }
 
 func (c *Client) ResetConnections() {
 	c.roundTripper.CloseIdleConnections()
+	c.resetHealthCheckTimer()
 }
 
-func (c *Client) healthCheck(ctx context.Context) error {
+func (c *Client) HealthCheck(ctx context.Context) error {
+	defer c.resetHealthCheckTimer()
 	request := &http.Request{
 		Method: http.MethodConnect,
 		URL: &url.URL{
@@ -238,7 +282,7 @@ func (c *Client) healthCheck(ctx context.Context) error {
 		Header: make(http.Header),
 		Host:   HealthCheckMagicAddress,
 	}
-	request.Header.Add("User-Agent", HealthCheckMagicAddress)
+	request.Header.Add("User-Agent", HealthCheckUserAgent)
 	request.Header.Add("Proxy-Authorization", c.auth)
 	response, err := c.roundTripper.RoundTrip(request.WithContext(ctx))
 	if err != nil {
