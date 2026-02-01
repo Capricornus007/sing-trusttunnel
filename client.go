@@ -408,6 +408,9 @@ func (u *udpConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	common.Must(binary.Write(header, binary.BigEndian, uint32(16+2+16+2+1+len(appName)+len(p))))
 	common.Must(header.WriteZeroN(16 + 2)) // Source address:port (unknown)
 	destination := M.ParseSocksaddr(addr.String())
+	if !destination.IsIP() {
+		return 0, E.New("only support IP")
+	}
 	destinationAddress := buildPaddingIP(destination.Addr)
 	common.Must1(header.Write(destinationAddress[:]))
 	common.Must(binary.Write(header, binary.BigEndian, destination.Port))
