@@ -151,7 +151,7 @@ func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, e
 	request.Header.Add("User-Agent", TCPUserAgent)
 	request.Header.Add("Proxy-Authorization", c.auth)
 	conn := &tcpConn{
-		httpConn{
+		httpConn: httpConn{
 			pipeWriter: pipeWriter,
 			wrapError:  c.wrapError,
 			created:    make(chan struct{}),
@@ -192,7 +192,7 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	request.Header.Add("User-Agent", UDPUserAgent)
 	request.Header.Add("Proxy-Authorization", c.auth)
 	conn := &udpConn{
-		httpConn{
+		httpConn: httpConn{
 			pipeWriter: pipeWriter,
 			wrapError:  c.wrapError,
 			created:    make(chan struct{}),
@@ -312,6 +312,14 @@ func (h *httpConn) setUp(body io.ReadCloser, err error) {
 	close(h.created)
 }
 
+func (h *httpConn) waitCreated() error {
+	if h.body != nil || h.createErr != nil {
+		return h.createErr
+	}
+	<-h.created
+	return h.createErr
+}
+
 func (h *httpConn) Close() error {
 	return common.Close(
 		common.PtrOrNil(h.pipeWriter),
@@ -346,11 +354,8 @@ type tcpConn struct {
 }
 
 func (t *tcpConn) Read(b []byte) (n int, err error) {
-	if t.body == nil {
-		<-t.created
-		if t.createErr != nil {
-			return 0, t.createErr
-		}
+	if err = t.waitCreated(); err != nil {
+		return 0, err
 	}
 	n, err = t.body.Read(b)
 	err = t.wrapError(err)
@@ -363,18 +368,41 @@ func (t *tcpConn) Write(b []byte) (n int, err error) {
 	return
 }
 
-var _ net.PacketConn = (*udpConn)(nil)
+var (
+	_ N.NetPacketConn    = (*udpConn)(nil)
+	_ N.FrontHeadroom    = (*udpConn)(nil)
+	_ N.PacketReadWaiter = (*udpConn)(nil)
+)
 
 type udpConn struct {
 	httpConn
+	readWaitOptions N.ReadWaitOptions
 }
 
-func (u *udpConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	if u.body == nil {
-		<-u.created
-		if u.createErr != nil {
-			return 0, nil, u.createErr
-		}
+func (u *udpConn) FrontHeadroom() int {
+	return 4 + 16 + 2 + 16 + 2 + 1 + math.MaxUint8
+}
+
+func (u *udpConn) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
+	u.readWaitOptions = options
+	return false
+}
+
+func (u *udpConn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
+	buffer = u.readWaitOptions.NewPacketBuffer()
+	destination, err = u.ReadPacket(buffer)
+	if err != nil {
+		buffer.Release()
+		return nil, M.Socksaddr{}, err
+	}
+	u.readWaitOptions.PostReturn(buffer)
+	return buffer, destination, nil
+}
+
+func (u *udpConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
+	err = u.waitCreated()
+	if err != nil {
+		return M.Socksaddr{}, err
 	}
 	header := buf.NewSize(4 + 16 + 2 + 16 + 2)
 	defer header.Release()
@@ -387,42 +415,66 @@ func (u *udpConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 	common.Must(binary.Read(header, binary.BigEndian, &length))
 	var sourceAddressBuffer [16]byte
 	common.Must1(header.Read(sourceAddressBuffer[:]))
-	var sourceAddress M.Socksaddr
-	sourceAddress.Addr = parse16BytesIP(sourceAddressBuffer)
-	common.Must(binary.Read(header, binary.BigEndian, &sourceAddress.Port))
+	destination.Addr = parse16BytesIP(sourceAddressBuffer)
+	common.Must(binary.Read(header, binary.BigEndian, &destination.Port))
 	common.Must(rw.SkipN(header, 16+2)) // To local address:port
-	buffer := buf.With(p)
-	n, err = buffer.ReadFullFrom(u.body, int(length)-(16+2+16+2))
-	addr = sourceAddress.UDPAddr()
+	_, err = buffer.ReadFullFrom(u.body, int(length)-(16+2+16+2))
 	err = u.wrapError(err)
 	return
 }
 
-func (u *udpConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+func (u *udpConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+	buffer := buf.With(p)
+	destination, err := u.ReadPacket(buffer)
+	if err != nil {
+		return
+	}
+	n = buffer.Len()
+	addr = destination.UDPAddr()
+	return
+}
+
+func (u *udpConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
+	defer buffer.Release()
+	if !destination.IsIP() {
+		return E.New("only support IP")
+	}
 	appName := AppName
 	if len(appName) > math.MaxUint8 {
 		appName = appName[:math.MaxUint8]
 	}
-	header := buf.NewSize(4 + 16 + 2 + 16 + 2 + 1 + len(appName))
-	defer header.Release()
-	common.Must(binary.Write(header, binary.BigEndian, uint32(16+2+16+2+1+len(appName)+len(p))))
-	common.Must(header.WriteZeroN(16 + 2)) // Source address:port (unknown)
-	destination := M.ParseSocksaddr(addr.String())
-	if !destination.IsIP() {
-		return 0, E.New("only support IP")
-	}
+	payloadLen := buffer.Len()
+	headerLen := 4 + 16 + 2 + 16 + 2 + 1 + len(appName)
+	lengthField := uint32(16 + 2 + 16 + 2 + 1 + len(appName) + payloadLen)
 	destinationAddress := buildPaddingIP(destination.Addr)
+
+	var header *buf.Buffer
+	if buffer.Start() >= headerLen {
+		headerBytes := buffer.ExtendHeader(headerLen)
+		header = buf.With(headerBytes)
+	} else {
+		header = buf.NewSize(headerLen)
+		defer header.Release()
+	}
+	common.Must(binary.Write(header, binary.BigEndian, lengthField))
+	common.Must(header.WriteZeroN(16 + 2)) // Source address:port (unknown)
 	common.Must1(header.Write(destinationAddress[:]))
 	common.Must(binary.Write(header, binary.BigEndian, destination.Port))
 	common.Must(binary.Write(header, binary.BigEndian, uint8(len(appName))))
-	common.Must1(header.Write([]byte(appName)))
-	_, err = u.pipeWriter.Write(header.Bytes())
+	common.Must1(header.WriteString(appName))
+	_, err := u.pipeWriter.Write(header.Bytes())
 	if err != nil {
-		err = u.wrapError(err)
-		return
+		return u.wrapError(err)
 	}
-	n, err = u.pipeWriter.Write(p)
-	err = u.wrapError(err)
+	_, err = u.pipeWriter.Write(buffer.Bytes())
+	return u.wrapError(err)
+}
+
+func (u *udpConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+	err = u.WritePacket(buf.As(p), M.SocksaddrFromNet(addr))
+	if err == nil {
+		n = len(p)
+	}
 	return
 }
 
@@ -445,12 +497,9 @@ func (i *IcmpConn) WritePing(id uint16, destination netip.Addr, sequenceNumber u
 }
 
 func (i *IcmpConn) ReadPing() (id uint16, sourceAddress netip.Addr, icmpType uint8, code uint8, sequenceNumber uint16, err error) {
-	if i.body == nil {
-		<-i.created
-		if i.createErr != nil {
-			err = i.createErr
-			return
-		}
+	err = i.waitCreated()
+	if err != nil {
+		return
 	}
 	response := buf.NewSize(2 + 16 + 1 + 1 + 2)
 	defer response.Release()
