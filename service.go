@@ -148,8 +148,7 @@ func (s *Service) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	authorization := request.Header.Get("Proxy-Authorization")
 	username, loaded := s.verify(authorization)
 	if !loaded {
-		// StatusProxyAuthRequired 407 show this is proxy, so we not use.
-		writer.WriteHeader(http.StatusForbidden)
+		writer.WriteHeader(http.StatusProxyAuthRequired)
 		s.badRequest(request.Context(), request, E.New("authorization failed"))
 		return
 	}
