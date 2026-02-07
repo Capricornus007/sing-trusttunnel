@@ -192,13 +192,14 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	}
 	request.Header.Add("User-Agent", UDPUserAgent)
 	request.Header.Add("Proxy-Authorization", c.auth)
-	conn := &udpConn{
-		httpConn: httpConn{
-			writer:    pipeWriter,
-			wrapError: c.wrapError,
-			created:   make(chan struct{}),
+	conn := &clientPacketConn{
+		packetConn: packetConn{
+			httpConn: httpConn{
+				writer:    pipeWriter,
+				wrapError: c.wrapError,
+				created:   make(chan struct{}),
+			},
 		},
-		isClient: true,
 	}
 	go func() {
 		response, err := c.roundTripper.RoundTrip(request.WithContext(ctx))

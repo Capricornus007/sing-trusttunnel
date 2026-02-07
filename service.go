@@ -168,14 +168,15 @@ func (s *Service) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		if isFlusher {
 			flusher.Flush()
 		}
-		conn := &udpConn{
-			httpConn: httpConn{
-				writer:    writer,
-				flusher:   flusher,
-				wrapError: wrapErrorFromContext(ctx),
-				created:   make(chan struct{}),
+		conn := &serverPacketConn{
+			packetConn: packetConn{
+				httpConn: httpConn{
+					writer:    writer,
+					flusher:   flusher,
+					wrapError: wrapErrorFromContext(ctx),
+					created:   make(chan struct{}),
+				},
 			},
-			isClient: false,
 		}
 		conn.setUp(request.Body, nil)
 		firstPacket := buf.NewPacket()
