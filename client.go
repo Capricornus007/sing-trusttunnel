@@ -265,7 +265,7 @@ func (c *Client) ListenICMP(ctx context.Context) (*IcmpConn, error) {
 }
 
 func (c *Client) Close() error {
-	c.roundTripper.CloseIdleConnections()
+	forceCloseAllConnections(c.roundTripper)
 	if c.healthCheckTimer != nil {
 		c.healthCheckTimer.Stop()
 	}
@@ -273,7 +273,7 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) ResetConnections() {
-	c.roundTripper.CloseIdleConnections()
+	forceCloseAllConnections(c.roundTripper)
 	c.resetHealthCheckTimer()
 }
 

@@ -50,6 +50,7 @@ type Service struct {
 	icmpHandler           ICMPHandler
 	quicCongestionControl string
 	httpServer            *http.Server
+	h2Server              *http2.Server
 	h3Server              io.Closer
 	tcpListener           net.Listener
 	tlsListener           net.Listener
@@ -84,8 +85,9 @@ func wrapErrorFromContext(ctx context.Context) func(error) error {
 
 func (s *Service) Start(tcpListener net.Listener, udpConn net.PacketConn, tlsConfig tls.ServerConfig) error {
 	if tcpListener != nil {
+		h2Server := &http2.Server{}
 		s.httpServer = &http.Server{
-			Handler:     h2c.NewHandler(s, &http2.Server{}),
+			Handler:     h2c.NewHandler(s, h2Server),
 			IdleTimeout: DefaultSessionTimeout,
 			BaseContext: func(net.Listener) context.Context {
 				ctx := s.ctx
@@ -93,6 +95,11 @@ func (s *Service) Start(tcpListener net.Listener, udpConn net.PacketConn, tlsCon
 				return ctx
 			},
 		}
+		err := http2.ConfigureServer(s.httpServer, h2Server)
+		if err != nil {
+			return err
+		}
+		s.h2Server = h2Server
 		listener := tcpListener
 		s.tcpListener = tcpListener
 		if tlsConfig != nil {
@@ -134,6 +141,7 @@ func (s *Service) Close() error {
 			shutdownErr = nil
 		}
 	}
+	forceCloseAllH2ServerConnections(s.h2Server)
 	closeErr := common.Close(
 		common.PtrOrNil(s.httpServer),
 		s.tlsListener,
