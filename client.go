@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"time"
 
@@ -35,6 +36,9 @@ type ClientOptions struct {
 	QUIC                  bool
 	QUICCongestionControl string
 	HealthCheck           bool
+	// ResolveFunc is the function to resolve FQDN for packet conn.
+	// If not set, the packet conn will reject FQDN when writing.
+	ResolveFunc func(fqdn string) (netip.Addr, error)
 }
 
 type Client struct {
@@ -46,14 +50,16 @@ type Client struct {
 	healthCheckTimer *time.Timer
 	wrapError        func(error) error
 	timeFunc         func() time.Time
+	resolveFunc      func(fqdn string) (netip.Addr, error)
 }
 
 func NewClient(options ClientOptions) (client *Client, err error) {
 	client = &Client{
-		ctx:    options.Ctx,
-		detour: options.Detour,
-		server: options.Server,
-		auth:   buildAuth(options.Auth),
+		ctx:         options.Ctx,
+		detour:      options.Detour,
+		server:      options.Server,
+		auth:        buildAuth(options.Auth),
+		resolveFunc: options.ResolveFunc,
 	}
 	nextProtos := options.TLSConfig.NextProtos()
 	if options.QUIC {
@@ -199,6 +205,7 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 				wrapError: c.wrapError,
 				created:   make(chan struct{}),
 			},
+			resolveFunc: c.resolveFunc,
 		},
 	}
 	go func() {

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 	"net"
+	"net/netip"
 
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
@@ -15,6 +16,7 @@ import (
 
 type packetConn struct {
 	httpConn
+	resolveFunc     func(fqdn string) (netip.Addr, error)
 	readWaitOptions N.ReadWaitOptions
 }
 
@@ -104,7 +106,14 @@ func (u *clientPacketConn) readPacketFromServer(buffer *buf.Buffer) (destination
 func (u *clientPacketConn) writePacketToServer(buffer *buf.Buffer, source M.Socksaddr) error {
 	defer buffer.Release()
 	if !source.IsIP() {
-		return E.New("only support IP")
+		if u.resolveFunc == nil {
+			return E.New("write to without resolveFunc")
+		}
+		ip, err := u.resolveFunc(source.Fqdn)
+		if err != nil {
+			return err
+		}
+		source.Addr = ip
 	}
 	appName := AppName
 	if len(appName) > math.MaxUint8 {
