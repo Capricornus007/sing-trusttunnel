@@ -141,6 +141,28 @@ func (c *Client) resetHealthCheckTimer() {
 	c.healthCheckTimer.Reset(DefaultHealthCheckTimeout)
 }
 
+func (c *Client) dial(ctx context.Context, request *http.Request, conn *httpConn, pipeReader *io.PipeReader, pipeWriter *io.PipeWriter) {
+	roundTripCtx, cancel := context.WithCancel(c.ctx) // requestCtx must alive during conn not closed
+	stop := context.AfterFunc(ctx, cancel)            // only to interrupt dialing
+	defer stop()                                      // RoundTrip already returned, do not cancel
+	response, err := c.roundTripper.RoundTrip(request.WithContext(roundTripCtx))
+	if err != nil {
+		err = c.wrapError(err)
+		_ = pipeWriter.CloseWithError(err)
+		_ = pipeReader.CloseWithError(err)
+		conn.setUp(nil, err)
+	} else if response.StatusCode != http.StatusOK {
+		_ = response.Body.Close()
+		err = E.New("unexpected status code: ", response.StatusCode)
+		_ = pipeWriter.CloseWithError(err)
+		_ = pipeReader.CloseWithError(err)
+		conn.setUp(nil, err)
+	} else {
+		c.resetHealthCheckTimer()
+		conn.setUp(response.Body, nil)
+	}
+}
+
 func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, error) {
 	pipeReader, pipeWriter := io.Pipe()
 	host := destination.String()
@@ -163,24 +185,7 @@ func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, e
 			created:   make(chan struct{}),
 		},
 	}
-	go func() {
-		response, err := c.roundTripper.RoundTrip(request.WithContext(ctx))
-		if err != nil {
-			err = c.wrapError(err)
-			_ = pipeWriter.CloseWithError(err)
-			_ = pipeReader.CloseWithError(err)
-			conn.setUp(nil, err)
-		} else if response.StatusCode != http.StatusOK {
-			_ = response.Body.Close()
-			err = E.New("unexpected status code: ", response.StatusCode)
-			_ = pipeWriter.CloseWithError(err)
-			_ = pipeReader.CloseWithError(err)
-			conn.setUp(nil, err)
-		} else {
-			c.resetHealthCheckTimer()
-			conn.setUp(response.Body, nil)
-		}
-	}()
+	go c.dial(ctx, request, &conn.httpConn, pipeReader, pipeWriter)
 	return conn, nil
 }
 
@@ -208,24 +213,7 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 			resolveFunc: c.resolveFunc,
 		},
 	}
-	go func() {
-		response, err := c.roundTripper.RoundTrip(request.WithContext(ctx))
-		if err != nil {
-			err = c.wrapError(err)
-			_ = pipeWriter.CloseWithError(err)
-			_ = pipeReader.CloseWithError(err)
-			conn.setUp(nil, err)
-		} else if response.StatusCode != http.StatusOK {
-			_ = response.Body.Close()
-			err = E.New("unexpected status code: ", response.StatusCode)
-			_ = pipeWriter.CloseWithError(err)
-			_ = pipeReader.CloseWithError(err)
-			conn.setUp(nil, err)
-		} else {
-			c.resetHealthCheckTimer()
-			conn.setUp(response.Body, nil)
-		}
-	}()
+	go c.dial(ctx, request, &conn.httpConn, pipeReader, pipeWriter)
 	return conn, nil
 }
 
@@ -250,24 +238,7 @@ func (c *Client) ListenICMP(ctx context.Context) (*IcmpConn, error) {
 			created:   make(chan struct{}),
 		},
 	}
-	go func() {
-		response, err := c.roundTripper.RoundTrip(request.WithContext(ctx))
-		if err != nil {
-			err = c.wrapError(err)
-			_ = pipeWriter.CloseWithError(err)
-			_ = pipeReader.CloseWithError(err)
-			conn.setUp(nil, err)
-		} else if response.StatusCode != http.StatusOK {
-			_ = response.Body.Close()
-			err = E.New("unexpected status code: ", response.StatusCode)
-			_ = pipeWriter.CloseWithError(err)
-			_ = pipeReader.CloseWithError(err)
-			conn.setUp(nil, err)
-		} else {
-			c.resetHealthCheckTimer()
-			conn.setUp(response.Body, nil)
-		}
-	}()
+	go c.dial(ctx, request, &conn.httpConn, pipeReader, pipeWriter)
 	return conn, nil
 }
 
