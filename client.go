@@ -163,8 +163,12 @@ func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, e
 			created:   make(chan struct{}),
 		},
 	}
+	requestCtx, cancel := context.WithCancel(c.ctx)
+	conn.closeHook = cancel
 	go func() {
-		response, err := c.roundTripper.RoundTrip(request.WithContext(ctx))
+		timeout := time.AfterFunc(DefaultSessionTimeout, cancel)
+		defer timeout.Stop()
+		response, err := c.roundTripper.RoundTrip(request.WithContext(requestCtx))
 		if err != nil {
 			err = c.wrapError(err)
 			_ = pipeWriter.CloseWithError(err)
@@ -208,8 +212,12 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 			resolveFunc: c.resolveFunc,
 		},
 	}
+	requestCtx, cancel := context.WithCancel(c.ctx)
+	conn.closeHook = cancel
 	go func() {
-		response, err := c.roundTripper.RoundTrip(request.WithContext(ctx))
+		timeout := time.AfterFunc(DefaultSessionTimeout, cancel)
+		defer timeout.Stop()
+		response, err := c.roundTripper.RoundTrip(request.WithContext(requestCtx))
 		if err != nil {
 			err = c.wrapError(err)
 			_ = pipeWriter.CloseWithError(err)
@@ -250,8 +258,12 @@ func (c *Client) ListenICMP(ctx context.Context) (*IcmpConn, error) {
 			created:   make(chan struct{}),
 		},
 	}
+	requestCtx, cancel := context.WithCancel(c.ctx)
+	conn.closeHook = cancel
 	go func() {
-		response, err := c.roundTripper.RoundTrip(request.WithContext(ctx))
+		timeoutTimer := time.AfterFunc(DefaultSessionTimeout, cancel)
+		defer timeoutTimer.Stop()
+		response, err := c.roundTripper.RoundTrip(request.WithContext(requestCtx))
 		if err != nil {
 			err = c.wrapError(err)
 			_ = pipeWriter.CloseWithError(err)

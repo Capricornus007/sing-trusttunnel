@@ -82,6 +82,7 @@ type httpConn struct {
 	wrapError func(error) error
 	created   chan struct{}
 	createErr error
+	closeHook func()
 }
 
 func (h *httpConn) setUp(body io.ReadCloser, err error) {
@@ -99,6 +100,9 @@ func (h *httpConn) waitCreated() error {
 }
 
 func (h *httpConn) Close() error {
+	if h.closeHook != nil {
+		h.closeHook()
+	}
 	return common.Close(
 		h.writer,
 		h.body,
