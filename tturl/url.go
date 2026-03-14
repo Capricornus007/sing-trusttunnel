@@ -68,6 +68,9 @@ func Parse(link string) (*URL, error) {
 	if !found {
 		return nil, E.New("schema is not ", Schema)
 	}
+	// since draft 2
+	// https://github.com/TrustTunnel/TrustTunnel/blob/984817f3b92f5769aedb15e3f90782bc88839825/DEEP_LINK.md?plain=1#L8
+	base64String = strings.TrimPrefix(base64String, "?")
 	buffer := buf.NewSize(base64.RawURLEncoding.DecodedLen(len(base64String)))
 	defer buffer.Release()
 	n, err := base64.RawURLEncoding.Decode(buffer.FreeBytes(), []byte(base64String))
@@ -368,7 +371,7 @@ func (u URL) Build() (string, error) {
 		}
 	}
 
-	return Schema + "://" + base64.RawURLEncoding.EncodeToString(builder.Bytes()), nil
+	return Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes()), nil
 }
 
 func writeTLV(writer io.Writer, tag uint64, data any) (err error) {

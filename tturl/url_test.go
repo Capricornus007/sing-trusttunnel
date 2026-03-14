@@ -26,7 +26,7 @@ func TestRoundTrip_MinimalConfig(t *testing.T) {
 
 	link, err := original.Build()
 	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(link, "tt://"))
+	require.True(t, strings.HasPrefix(link, "tt://?"))
 
 	parsed, err := Parse(link)
 	require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestParse_DefaultUpstreamProtocolHTTP2(t *testing.T) {
 	common.Must(writeTLV(builder, TagUsername, "user"))
 	common.Must(writeTLV(builder, TagPassword, "pass"))
 
-	link := Schema + "://" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
+	link := Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
 	parsed, err := Parse(link)
 	require.NoError(t, err)
 	require.EqualValues(t, UpstreamProtocolHTTP2, parsed.UpstreamProtocol)
@@ -174,7 +174,7 @@ func TestParse_IgnoreUnknownTag(t *testing.T) {
 	common.Must(writeTLV(builder, TagPassword, "pass"))
 	common.Must(writeTLV(builder, 0x0c, []byte{0x01, 0x02, 0x03}))
 
-	link := Schema + "://" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
+	link := Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
 	parsed, err := Parse(link)
 	require.NoError(t, err)
 	require.Equal(t, "user", parsed.Username)
@@ -192,7 +192,7 @@ func TestParse_RejectLengthExceedingRemainingBuffer(t *testing.T) {
 	_, err := builder.WriteString("abc")
 	require.NoError(t, err)
 
-	link := Schema + "://" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
+	link := Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
 	_, err = Parse(link)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid length of tag")
@@ -244,6 +244,35 @@ func TestBuild_WithCertificateRoundTrip(t *testing.T) {
 	require.EqualValues(t, UpstreamProtocolHTTP2, parsed.UpstreamProtocol)
 }
 
+func TestParse_LegacyFormatWithoutQuestionMark(t *testing.T) {
+	// Old format tt://Base64 should still be parsed successfully
+	original := URL{
+		Hostname:  "vpn.example.com",
+		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+		Username:  "alice",
+		Password:  "secret",
+	}
+
+	link, err := original.Build()
+	require.NoError(t, err)
+
+	// Build now produces new format with ?
+	require.True(t, strings.HasPrefix(link, Schema+"://?"))
+
+	// New format with ? should parse
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+	require.Equal(t, "vpn.example.com", parsed.Hostname)
+	require.Equal(t, "alice", parsed.Username)
+
+	// Legacy format without ? should also parse
+	legacyLink := strings.Replace(link, Schema+"://?", Schema+"://", 1)
+	parsed2, err := Parse(legacyLink)
+	require.NoError(t, err)
+	require.Equal(t, "vpn.example.com", parsed2.Hostname)
+	require.Equal(t, "alice", parsed2.Username)
+}
+
 func assertAddressesEqual(t *testing.T, got []M.Socksaddr, want []M.Socksaddr) {
 	t.Helper()
 	require.Len(t, got, len(want))
@@ -256,6 +285,7 @@ func decodeTLVTags(t *testing.T, link string) []uint64 {
 	t.Helper()
 	encoded, found := strings.CutPrefix(link, Schema+"://")
 	require.True(t, found)
+	encoded = strings.TrimPrefix(encoded, "?")
 
 	payload, err := base64.RawURLEncoding.DecodeString(encoded)
 	require.NoError(t, err)
