@@ -53,6 +53,12 @@ func TestRoundTrip_MaximalConfig(t *testing.T) {
 		Certificate:        []byte{0x30, 0x82, 0x01, 0x23},
 		UpstreamProtocol:   UpstreamProtocolHTTP3,
 		AntiDPI:            true,
+		Name:               "My VPN Server",
+		DNSUpstreams: []string{
+			"1.1.1.1",
+			"tls://dns.example.com",
+			"https://dns.example.com/dns-query",
+		},
 	}
 
 	link, err := original.Build()
@@ -71,6 +77,8 @@ func TestRoundTrip_MaximalConfig(t *testing.T) {
 	require.Equal(t, original.Certificate, parsed.Certificate)
 	require.Equal(t, original.UpstreamProtocol, parsed.UpstreamProtocol)
 	require.Equal(t, original.AntiDPI, parsed.AntiDPI)
+	require.Equal(t, original.Name, parsed.Name)
+	require.Equal(t, original.DNSUpstreams, parsed.DNSUpstreams)
 }
 
 func TestRoundTrip_MultipleAddresses(t *testing.T) {
@@ -225,6 +233,138 @@ func TestBuild_HTTP3UpstreamProtocolTagIncluded(t *testing.T) {
 	assert.Contains(t, tags, TagUpstreamProtocol)
 }
 
+func TestRoundTrip_Name(t *testing.T) {
+	original := URL{
+		Hostname:  "vpn.example.com",
+		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+		Username:  "user",
+		Password:  "pass",
+		Name:      "My VPN Server",
+	}
+
+	link, err := original.Build()
+	require.NoError(t, err)
+
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+	require.Equal(t, original.Name, parsed.Name)
+}
+
+func TestRoundTrip_DNSUpstreams(t *testing.T) {
+	original := URL{
+		Hostname:  "vpn.example.com",
+		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+		Username:  "user",
+		Password:  "pass",
+		DNSUpstreams: []string{
+			"1.1.1.1",
+			"tls://dns.example.com",
+			"https://dns.example.com/dns-query",
+		},
+	}
+
+	link, err := original.Build()
+	require.NoError(t, err)
+
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+	require.Equal(t, original.DNSUpstreams, parsed.DNSUpstreams)
+}
+
+func TestBuild_DNSUpstreamsEncodedAsSingleStringArrayTLV(t *testing.T) {
+	url := URL{
+		Hostname:  "vpn.example.com",
+		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+		Username:  "user",
+		Password:  "pass",
+		DNSUpstreams: []string{
+			"1.1.1.1",
+			"8.8.8.8",
+		},
+	}
+
+	link, err := url.Build()
+	require.NoError(t, err)
+
+	payload := decodeTLVPayload(t, link)
+	dnsValues := decodeTLVValues(t, payload, TagDNSUpstreams)
+	require.Len(t, dnsValues, 1)
+
+	reader := bytes.NewReader(dnsValues[0])
+	firstLength, err := readVarint(reader)
+	require.NoError(t, err)
+	require.EqualValues(t, len("1.1.1.1"), firstLength)
+
+	first := make([]byte, int(firstLength))
+	_, err = io.ReadFull(reader, first)
+	require.NoError(t, err)
+	require.Equal(t, "1.1.1.1", string(first))
+
+	secondLength, err := readVarint(reader)
+	require.NoError(t, err)
+	require.EqualValues(t, len("8.8.8.8"), secondLength)
+
+	second := make([]byte, int(secondLength))
+	_, err = io.ReadFull(reader, second)
+	require.NoError(t, err)
+	require.Equal(t, "8.8.8.8", string(second))
+	require.Zero(t, reader.Len())
+}
+
+func TestParse_DNSUpstreamsFromSingleStringArrayTLV(t *testing.T) {
+	builder := bytes.NewBuffer(nil)
+	common.Must(writeTLV(builder, TagVersion, Version))
+	common.Must(writeTLV(builder, TagHostname, "vpn.example.com"))
+	common.Must(writeTLV(builder, TagAddresses, "1.2.3.4:443"))
+	common.Must(writeTLV(builder, TagUsername, "user"))
+	common.Must(writeTLV(builder, TagPassword, "pass"))
+
+	dnsUpstreamsBuffer := bytes.NewBuffer(nil)
+	common.Must(writeVarint(dnsUpstreamsBuffer, uint64(len("1.1.1.1"))))
+	_, err := io.WriteString(dnsUpstreamsBuffer, "1.1.1.1")
+	require.NoError(t, err)
+	common.Must(writeVarint(dnsUpstreamsBuffer, uint64(len("tls://dns.example.com"))))
+	_, err = io.WriteString(dnsUpstreamsBuffer, "tls://dns.example.com")
+	require.NoError(t, err)
+	common.Must(writeTLV(builder, TagDNSUpstreams, dnsUpstreamsBuffer.Bytes()))
+
+	link := Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+	require.Equal(t, []string{"1.1.1.1", "tls://dns.example.com"}, parsed.DNSUpstreams)
+}
+
+func TestRoundTrip_WithoutNewOptionalFields(t *testing.T) {
+	original := URL{
+		Hostname:  "vpn.example.com",
+		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+		Username:  "user",
+		Password:  "pass",
+	}
+
+	link, err := original.Build()
+	require.NoError(t, err)
+
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+	require.Empty(t, parsed.Name)
+	require.Empty(t, parsed.DNSUpstreams)
+}
+
+func TestParse_UnsupportedVersionRejected(t *testing.T) {
+	builder := bytes.NewBuffer(nil)
+	common.Must(writeVarint(builder, TagVersion))
+	common.Must(writeVarint(builder, 1))
+	_, err := builder.Write([]byte{99})
+	require.NoError(t, err)
+	common.Must(writeTLV(builder, TagHostname, "vpn"))
+
+	link := Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
+	_, err = Parse(link)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected version: 99")
+}
+
 func TestBuild_WithCertificateRoundTrip(t *testing.T) {
 	url := URL{
 		Hostname:    "example.com",
@@ -283,14 +423,7 @@ func assertAddressesEqual(t *testing.T, got []M.Socksaddr, want []M.Socksaddr) {
 
 func decodeTLVTags(t *testing.T, link string) []uint64 {
 	t.Helper()
-	encoded, found := strings.CutPrefix(link, Schema+"://")
-	require.True(t, found)
-	encoded = strings.TrimPrefix(encoded, "?")
-
-	payload, err := base64.RawURLEncoding.DecodeString(encoded)
-	require.NoError(t, err)
-
-	reader := bytes.NewReader(payload)
+	reader := bytes.NewReader(decodeTLVPayload(t, link))
 	tags := make([]uint64, 0, 8)
 	for {
 		tag, err := readVarint(reader)
@@ -310,4 +443,42 @@ func decodeTLVTags(t *testing.T, link string) []uint64 {
 	}
 
 	return tags
+}
+
+func decodeTLVPayload(t *testing.T, link string) []byte {
+	t.Helper()
+	encoded, found := strings.CutPrefix(link, Schema+"://")
+	require.True(t, found)
+	encoded = strings.TrimPrefix(encoded, "?")
+
+	payload, err := base64.RawURLEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	return payload
+}
+
+func decodeTLVValues(t *testing.T, payload []byte, targetTag uint64) [][]byte {
+	t.Helper()
+	reader := bytes.NewReader(payload)
+	var values [][]byte
+	for {
+		tag, err := readVarint(reader)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			require.NoError(t, err)
+		}
+
+		length, err := readVarint(reader)
+		require.NoError(t, err)
+
+		value := make([]byte, int(length))
+		_, err = io.ReadFull(reader, value)
+		require.NoError(t, err)
+
+		if tag == targetTag {
+			values = append(values, value)
+		}
+	}
+	return values
 }

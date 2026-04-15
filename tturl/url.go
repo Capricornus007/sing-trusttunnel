@@ -27,11 +27,13 @@ const (
 	TagHasIPv6            uint64 = 0x04 // Always true in original implementation
 	TagUsername           uint64 = 0x05
 	TagPassword           uint64 = 0x06
-	TagClientRandomPrefix uint64 = 0x0B // Naive and ridiculous design.
 	TagSkipVerification   uint64 = 0x07
 	TagCertificate        uint64 = 0x08
 	TagUpstreamProtocol   uint64 = 0x09
 	TagAntiDPI            uint64 = 0x0A
+	TagClientRandomPrefix uint64 = 0x0B // Naive and ridiculous design.
+	TagName               uint64 = 0x0C
+	TagDNSUpstreams       uint64 = 0x0D
 )
 
 type UpstreamProtocol byte
@@ -56,11 +58,13 @@ type URL struct {
 	CustomSNI          string
 	Username           string
 	Password           string
-	ClientRandomPrefix string
 	SkipVerification   bool
 	Certificate        []byte // der
 	UpstreamProtocol   UpstreamProtocol
 	AntiDPI            bool
+	ClientRandomPrefix string
+	Name               string
+	DNSUpstreams       []string
 }
 
 func Parse(link string) (*URL, error) {
@@ -154,12 +158,6 @@ func parseTag(buffer *buf.Buffer, url *URL, tag uint64) error {
 			return err
 		}
 		url.Password = value
-	case TagClientRandomPrefix:
-		value, err := readTLVString(buffer, tag)
-		if err != nil {
-			return err
-		}
-		url.ClientRandomPrefix = value
 	case TagSkipVerification:
 		value, err := readTLVBool(buffer, tag)
 		if err != nil {
@@ -188,6 +186,24 @@ func parseTag(buffer *buf.Buffer, url *URL, tag uint64) error {
 			return err
 		}
 		url.AntiDPI = value
+	case TagClientRandomPrefix:
+		value, err := readTLVString(buffer, tag)
+		if err != nil {
+			return err
+		}
+		url.ClientRandomPrefix = value
+	case TagName:
+		value, err := readTLVString(buffer, tag)
+		if err != nil {
+			return err
+		}
+		url.Name = value
+	case TagDNSUpstreams:
+		value, err := readTLVStringArray(buffer, tag)
+		if err != nil {
+			return err
+		}
+		url.DNSUpstreams = value
 	case TagHasIPv6:
 		fallthrough
 	default:
@@ -253,6 +269,34 @@ func readTLVBytes(buffer *buf.Buffer, tag uint64) ([]byte, error) {
 		return nil, err
 	}
 	return readBuffer, nil
+}
+
+func readTLVStringArray(buffer *buf.Buffer, tag uint64) ([]string, error) {
+	data, err := readTLVBytes(buffer, tag)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	reader := bytes.NewReader(data)
+	var result []string
+	for reader.Len() > 0 {
+		length, err := readVarint(reader)
+		if err != nil {
+			return nil, err
+		}
+		if length > uint64(reader.Len()) {
+			return nil, E.New("invalid string array length of tag ", tag, ": ", length, ", remaining: ", reader.Len())
+		}
+		item := make([]byte, int(length))
+		_, err = io.ReadFull(reader, item)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, string(item))
+	}
+	return result, nil
 }
 
 func readTLVLength(buffer *buf.Buffer, tag uint64) (uint64, error) {
@@ -370,6 +414,18 @@ func (u URL) Build() (string, error) {
 			return "", E.Cause(err, "write anti-dpi")
 		}
 	}
+	if name := u.Name; name != "" {
+		err = writeTLV(builder, TagName, name)
+		if err != nil {
+			return "", E.Cause(err, "write name")
+		}
+	}
+	if len(u.DNSUpstreams) > 0 {
+		err = writeTLV(builder, TagDNSUpstreams, u.DNSUpstreams)
+		if err != nil {
+			return "", E.Cause(err, "write dns upstreams")
+		}
+	}
 
 	return Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes()), nil
 }
@@ -411,6 +467,25 @@ func writeTLV(writer io.Writer, tag uint64, data any) (err error) {
 			return
 		}
 		_, err = writer.Write(value)
+		return
+	case []string:
+		values := data.([]string)
+		var buffer bytes.Buffer
+		for i, value := range values {
+			err = writeVarint(&buffer, uint64(len(value)))
+			if err != nil {
+				return E.Cause(err, "write string array length ", i)
+			}
+			_, err = io.WriteString(&buffer, value)
+			if err != nil {
+				return E.Cause(err, "write string array ", i)
+			}
+		}
+		err = writeVarint(writer, uint64(buffer.Len()))
+		if err != nil {
+			return E.Cause(err, "write string array tlv length")
+		}
+		_, err = writer.Write(buffer.Bytes())
 		return
 	default:
 		panic("unexpected data type")
