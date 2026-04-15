@@ -141,19 +141,23 @@ func (c *Client) resetHealthCheckTimer() {
 	c.healthCheckTimer.Reset(DefaultHealthCheckTimeout)
 }
 
-func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, error) {
-	pipeReader, pipeWriter := io.Pipe()
-	host := destination.String()
-	request := &http.Request{
+func newRequest(serverAddr, host string, body io.ReadCloser) *http.Request {
+	return &http.Request{
 		Method: http.MethodConnect,
 		URL: &url.URL{
 			Scheme: "https",
-			Host:   host,
+			Host:   serverAddr, // HTTP/2 reuse connection based on URL.Host
 		},
 		Header: make(http.Header),
-		Body:   pipeReader,
+		Body:   body,
 		Host:   host,
 	}
+}
+
+func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, error) {
+	pipeReader, pipeWriter := io.Pipe()
+	host := destination.String()
+	request := newRequest(c.server.String(), host, pipeReader)
 	request.Header.Add("User-Agent", TCPUserAgent)
 	request.Header.Add("Proxy-Authorization", c.auth)
 	conn := &tcpConn{
@@ -190,16 +194,7 @@ func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, e
 
 func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	pipeReader, pipeWriter := io.Pipe()
-	request := &http.Request{
-		Method: http.MethodConnect,
-		URL: &url.URL{
-			Scheme: "https",
-			Host:   UDPMagicAddress,
-		},
-		Header: make(http.Header),
-		Body:   pipeReader,
-		Host:   UDPMagicAddress,
-	}
+	request := newRequest(c.server.String(), UDPMagicAddress, pipeReader)
 	request.Header.Add("User-Agent", UDPUserAgent)
 	request.Header.Add("Proxy-Authorization", c.auth)
 	conn := &clientPacketConn{
@@ -239,16 +234,7 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 
 func (c *Client) ListenICMP(ctx context.Context) (*IcmpConn, error) {
 	pipeReader, pipeWriter := io.Pipe()
-	request := &http.Request{
-		Method: http.MethodConnect,
-		URL: &url.URL{
-			Scheme: "https",
-			Host:   ICMPMagicAddress,
-		},
-		Header: make(http.Header),
-		Body:   pipeReader,
-		Host:   ICMPMagicAddress,
-	}
+	request := newRequest(c.server.String(), ICMPMagicAddress, pipeReader)
 	request.Header.Add("User-Agent", ICMPUserAgent)
 	request.Header.Add("Proxy-Authorization", c.auth)
 	conn := &IcmpConn{
