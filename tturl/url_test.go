@@ -173,6 +173,50 @@ func TestParse_DefaultUpstreamProtocolHTTP2(t *testing.T) {
 	require.EqualValues(t, UpstreamProtocolHTTP2, parsed.UpstreamProtocol)
 }
 
+func TestParse_Draft2FormatWithQuestionMark(t *testing.T) {
+	builder := bytes.NewBuffer(nil)
+	common.Must(writeTLV(builder, TagVersion, Version1))
+	common.Must(writeTLV(builder, TagHostname, "example.com"))
+	common.Must(writeTLV(builder, TagAddresses, "1.2.3.4:443"))
+	common.Must(writeTLV(builder, TagUsername, "user"))
+	common.Must(writeTLV(builder, TagPassword, "pass"))
+
+	link := Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+	require.Equal(t, "example.com", parsed.Hostname)
+	require.Equal(t, "user", parsed.Username)
+	require.Equal(t, "pass", parsed.Password)
+}
+
+func TestParse_AcceptsSupportedVersions(t *testing.T) {
+	testCases := []struct {
+		name    string
+		version byte
+	}{
+		{name: "version 0", version: Version0},
+		{name: "version 1", version: Version1},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			builder := bytes.NewBuffer(nil)
+			common.Must(writeTLV(builder, TagVersion, testCase.version))
+			common.Must(writeTLV(builder, TagHostname, "vpn.example.com"))
+			common.Must(writeTLV(builder, TagAddresses, "1.2.3.4:443"))
+			common.Must(writeTLV(builder, TagUsername, "alice"))
+			common.Must(writeTLV(builder, TagPassword, "secret"))
+
+			link := Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
+			parsed, err := Parse(link)
+			require.NoError(t, err)
+			require.Equal(t, "vpn.example.com", parsed.Hostname)
+			require.Equal(t, "alice", parsed.Username)
+			require.Equal(t, "secret", parsed.Password)
+		})
+	}
+}
+
 func TestParse_IgnoreUnknownTag(t *testing.T) {
 	builder := bytes.NewBuffer(nil)
 	common.Must(writeTLV(builder, TagVersion, Version))

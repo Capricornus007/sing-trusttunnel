@@ -15,9 +15,20 @@ import (
 )
 
 const (
-	Schema       = "tt"
-	Version byte = 0x00
+	Schema        = "tt"
+	Version       = Version1
+	Version0 byte = 0
+	Version1 byte = 1
 )
+
+func IsValidVersion(version byte) bool {
+	switch version {
+	case Version0, Version1:
+		return true
+	default:
+		return false
+	}
+}
 
 const (
 	TagVersion            uint64 = 0x00
@@ -121,7 +132,7 @@ func parseTag(buffer *buf.Buffer, url *URL, tag uint64) error {
 		if err != nil {
 			return err
 		}
-		if version != Version {
+		if !IsValidVersion(version) {
 			return E.New("unexpected version: ", version)
 		}
 	case TagHostname:
