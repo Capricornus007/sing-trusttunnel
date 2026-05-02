@@ -156,7 +156,9 @@ func (s *Service) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	authorization := request.Header.Get("Proxy-Authorization")
 	username, loaded := s.verify(authorization)
 	if !loaded {
-		writer.WriteHeader(http.StatusProxyAuthRequired)
+		// Though specification requires 407, this commit allow to use others.
+		// https://github.com/TrustTunnel/TrustTunnel/commit/1553e91f340ea884b4fcc775d46193aa9704b8e9
+		writer.WriteHeader(http.StatusForbidden)
 		s.badRequest(request.Context(), request, E.New("authorization failed"))
 		return
 	}
