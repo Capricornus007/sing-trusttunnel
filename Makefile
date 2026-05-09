@@ -1,3 +1,6 @@
+build:
+	go build -v -trimpath -ldflags='-w -s -buildid=' -tags "with_quic" ./cmd/sing-trusttunnel
+
 fmt:
 	@gofumpt -l -w .
 	@gofmt -s -w .

@@ -2,3 +2,7 @@
 .vscode
 /vendor/
 .DS_Store
+
+*.json
+*.exe
+/sing-trusttunnel
