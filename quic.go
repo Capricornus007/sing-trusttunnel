@@ -54,10 +54,15 @@ func (c *Client) quicRoundTripper(tlsConfig tls.Config, congestionControlName st
 }
 
 func (s *Service) configHTTP3Server(tlsConfig tls.ServerConfig, udpConn net.PacketConn) error {
+	tlsConfig = tlsConfig.Clone().(tls.ServerConfig)
 	err := qtls.ConfigureHTTP3(tlsConfig)
 	if err != nil {
 		return err
 	}
+	// https://github.com/SagerNet/sing-quic/blob/2afc335e0cddca3346d22ac42b26098faa783975/quic.go#L125
+	// qtls.ConfigureHTTP3 never work because http3.ConfigureTLSConfig modified and returns a copy.
+	// https://github.com/quic-go/quic-go/blob/c56e8c79d1627cc1ed6005b421b4b0adadd83665/http3/server.go#L47-L63
+	tlsConfig.SetNextProtos([]string{http3.NextProtoH3})
 	quicListener, err := qtls.ListenEarly(udpConn, tlsConfig, &quic.Config{
 		Versions:           []quic.Version{quic.Version1},
 		MaxIdleTimeout:     DefaultQuicMaxIdleTimeout,
