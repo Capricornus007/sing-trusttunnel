@@ -1,3 +1,4 @@
+// Package trusttunnel implements the TrustTunnel protocol.
 package trusttunnel
 
 import (

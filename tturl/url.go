@@ -1,3 +1,4 @@
+// Package tturl parses and builds TrustTunnel URLs.
 package tturl
 
 import (
@@ -446,15 +447,13 @@ func writeTLV(writer io.Writer, tag uint64, data any) (err error) {
 	if err != nil {
 		return
 	}
-	switch data.(type) {
+	switch data := data.(type) {
 	case byte:
-		value := data.(byte)
-		_, err = writer.Write([]byte{1, value})
+		_, err = writer.Write([]byte{1, data})
 		return
 	case bool:
-		value := data.(bool)
 		buffer := [2]byte{1, 0}
-		if value {
+		if data {
 			buffer[1] = 0x01
 		} else {
 			buffer[1] = 0x00
@@ -462,27 +461,24 @@ func writeTLV(writer io.Writer, tag uint64, data any) (err error) {
 		_, err = writer.Write(buffer[:])
 		return
 	case string:
-		value := data.(string)
-		length := uint64(len(value))
+		length := uint64(len(data))
 		err = writeVarint(writer, length)
 		if err != nil {
 			return
 		}
-		_, err = io.WriteString(writer, value)
+		_, err = io.WriteString(writer, data)
 		return
 	case []byte:
-		value := data.([]byte)
-		length := uint64(len(value))
+		length := uint64(len(data))
 		err = writeVarint(writer, length)
 		if err != nil {
 			return
 		}
-		_, err = writer.Write(value)
+		_, err = writer.Write(data)
 		return
 	case []string:
-		values := data.([]string)
 		var buffer bytes.Buffer
-		for i, value := range values {
+		for i, value := range data {
 			err = writeVarint(&buffer, uint64(len(value)))
 			if err != nil {
 				return E.Cause(err, "write string array length ", i)

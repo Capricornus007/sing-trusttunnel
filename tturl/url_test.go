@@ -17,6 +17,7 @@ import (
 )
 
 func TestRoundTrip_MinimalConfig(t *testing.T) {
+	t.Parallel()
 	original := URL{
 		Hostname:  "vpn.example.com",
 		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
@@ -39,6 +40,7 @@ func TestRoundTrip_MinimalConfig(t *testing.T) {
 }
 
 func TestRoundTrip_MaximalConfig(t *testing.T) {
+	t.Parallel()
 	original := URL{
 		Hostname: "secure.vpn.example.com",
 		Addresses: []M.Socksaddr{
@@ -82,6 +84,7 @@ func TestRoundTrip_MaximalConfig(t *testing.T) {
 }
 
 func TestRoundTrip_MultipleAddresses(t *testing.T) {
+	t.Parallel()
 	original := URL{
 		Hostname: "multi.vpn.com",
 		Addresses: []M.Socksaddr{
@@ -102,6 +105,7 @@ func TestRoundTrip_MultipleAddresses(t *testing.T) {
 }
 
 func TestRoundTrip_LongValues(t *testing.T) {
+	t.Parallel()
 	longPassword := strings.Repeat("a", 200)
 	longHostname := strings.Repeat("sub", 50) + ".vpn.example.com"
 	original := URL{
@@ -122,6 +126,7 @@ func TestRoundTrip_LongValues(t *testing.T) {
 }
 
 func TestRoundTrip_SpecialCharacters(t *testing.T) {
+	t.Parallel()
 	original := URL{
 		Hostname:  "vpn.example.com",
 		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
@@ -141,6 +146,7 @@ func TestRoundTrip_SpecialCharacters(t *testing.T) {
 }
 
 func TestRoundTrip_IPv6Addresses(t *testing.T) {
+	t.Parallel()
 	original := URL{
 		Hostname: "vpn6.example.com",
 		Addresses: []M.Socksaddr{
@@ -160,6 +166,7 @@ func TestRoundTrip_IPv6Addresses(t *testing.T) {
 }
 
 func TestParse_DefaultUpstreamProtocolHTTP2(t *testing.T) {
+	t.Parallel()
 	builder := bytes.NewBuffer(nil)
 	common.Must(writeTLV(builder, TagVersion, Version))
 	common.Must(writeTLV(builder, TagHostname, "example.com"))
@@ -174,6 +181,7 @@ func TestParse_DefaultUpstreamProtocolHTTP2(t *testing.T) {
 }
 
 func TestParse_Draft2FormatWithQuestionMark(t *testing.T) {
+	t.Parallel()
 	builder := bytes.NewBuffer(nil)
 	common.Must(writeTLV(builder, TagVersion, Version1))
 	common.Must(writeTLV(builder, TagHostname, "example.com"))
@@ -190,6 +198,7 @@ func TestParse_Draft2FormatWithQuestionMark(t *testing.T) {
 }
 
 func TestParse_AcceptsSupportedVersions(t *testing.T) {
+	t.Parallel()
 	testCases := []struct {
 		name    string
 		version byte
@@ -200,6 +209,8 @@ func TestParse_AcceptsSupportedVersions(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
 			builder := bytes.NewBuffer(nil)
 			common.Must(writeTLV(builder, TagVersion, testCase.version))
 			common.Must(writeTLV(builder, TagHostname, "vpn.example.com"))
@@ -218,6 +229,7 @@ func TestParse_AcceptsSupportedVersions(t *testing.T) {
 }
 
 func TestParse_IgnoreUnknownTag(t *testing.T) {
+	t.Parallel()
 	builder := bytes.NewBuffer(nil)
 	common.Must(writeTLV(builder, TagVersion, Version))
 	common.Must(writeTLV(builder, TagHostname, "example.com"))
@@ -233,11 +245,13 @@ func TestParse_IgnoreUnknownTag(t *testing.T) {
 }
 
 func TestParse_InvalidScheme(t *testing.T) {
+	t.Parallel()
 	_, err := Parse("http://example.com")
 	require.Error(t, err)
 }
 
 func TestParse_RejectLengthExceedingRemainingBuffer(t *testing.T) {
+	t.Parallel()
 	builder := bytes.NewBuffer(nil)
 	common.Must(writeVarint(builder, TagHostname))
 	common.Must(writeVarint(builder, 5))
@@ -251,6 +265,7 @@ func TestParse_RejectLengthExceedingRemainingBuffer(t *testing.T) {
 }
 
 func TestBuild_DefaultUpstreamProtocolTagOmitted(t *testing.T) {
+	t.Parallel()
 	url := URL{
 		Hostname:  "example.com",
 		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
@@ -264,6 +279,7 @@ func TestBuild_DefaultUpstreamProtocolTagOmitted(t *testing.T) {
 }
 
 func TestBuild_HTTP3UpstreamProtocolTagIncluded(t *testing.T) {
+	t.Parallel()
 	url := URL{
 		Hostname:         "example.com",
 		Addresses:        []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
@@ -278,6 +294,7 @@ func TestBuild_HTTP3UpstreamProtocolTagIncluded(t *testing.T) {
 }
 
 func TestRoundTrip_Name(t *testing.T) {
+	t.Parallel()
 	original := URL{
 		Hostname:  "vpn.example.com",
 		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
@@ -295,6 +312,7 @@ func TestRoundTrip_Name(t *testing.T) {
 }
 
 func TestRoundTrip_DNSUpstreams(t *testing.T) {
+	t.Parallel()
 	original := URL{
 		Hostname:  "vpn.example.com",
 		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
@@ -316,6 +334,7 @@ func TestRoundTrip_DNSUpstreams(t *testing.T) {
 }
 
 func TestBuild_DNSUpstreamsEncodedAsSingleStringArrayTLV(t *testing.T) {
+	t.Parallel()
 	url := URL{
 		Hostname:  "vpn.example.com",
 		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
@@ -356,6 +375,7 @@ func TestBuild_DNSUpstreamsEncodedAsSingleStringArrayTLV(t *testing.T) {
 }
 
 func TestParse_DNSUpstreamsFromSingleStringArrayTLV(t *testing.T) {
+	t.Parallel()
 	builder := bytes.NewBuffer(nil)
 	common.Must(writeTLV(builder, TagVersion, Version))
 	common.Must(writeTLV(builder, TagHostname, "vpn.example.com"))
@@ -379,6 +399,7 @@ func TestParse_DNSUpstreamsFromSingleStringArrayTLV(t *testing.T) {
 }
 
 func TestRoundTrip_WithoutNewOptionalFields(t *testing.T) {
+	t.Parallel()
 	original := URL{
 		Hostname:  "vpn.example.com",
 		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
@@ -396,6 +417,7 @@ func TestRoundTrip_WithoutNewOptionalFields(t *testing.T) {
 }
 
 func TestParse_UnsupportedVersionRejected(t *testing.T) {
+	t.Parallel()
 	builder := bytes.NewBuffer(nil)
 	common.Must(writeVarint(builder, TagVersion))
 	common.Must(writeVarint(builder, 1))
@@ -410,6 +432,7 @@ func TestParse_UnsupportedVersionRejected(t *testing.T) {
 }
 
 func TestBuild_WithCertificateRoundTrip(t *testing.T) {
+	t.Parallel()
 	url := URL{
 		Hostname:    "example.com",
 		Addresses:   []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
@@ -429,6 +452,7 @@ func TestBuild_WithCertificateRoundTrip(t *testing.T) {
 }
 
 func TestParse_LegacyFormatWithoutQuestionMark(t *testing.T) {
+	t.Parallel()
 	// Old format tt://Base64 should still be parsed successfully
 	original := URL{
 		Hostname:  "vpn.example.com",
