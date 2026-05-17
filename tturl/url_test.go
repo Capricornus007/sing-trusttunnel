@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sagernet/sing/common"
+	F "github.com/sagernet/sing/common/format"
 	M "github.com/sagernet/sing/common/metadata"
 
 	"github.com/stretchr/testify/assert"
@@ -549,4 +550,182 @@ func decodeTLVValues(t *testing.T, payload []byte, targetTag uint64) [][]byte {
 		}
 	}
 	return values
+}
+
+func TestBuild_ValidationErrors(t *testing.T) {
+	t.Parallel()
+	addr := M.Socksaddr{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}
+	testCases := []struct {
+		name    string
+		url     URL
+		wantErr string
+	}{
+		{
+			name:    "missing hostname",
+			url:     URL{Addresses: []M.Socksaddr{addr}, Username: "user", Password: "pass"},
+			wantErr: "missing hostname",
+		},
+		{
+			name:    "missing addresses",
+			url:     URL{Hostname: "example.com", Username: "user", Password: "pass"},
+			wantErr: "missing addresses",
+		},
+		{
+			name:    "missing username",
+			url:     URL{Hostname: "example.com", Addresses: []M.Socksaddr{addr}, Password: "pass"},
+			wantErr: "missing username",
+		},
+		{
+			name:    "missing password",
+			url:     URL{Hostname: "example.com", Addresses: []M.Socksaddr{addr}, Username: "user"},
+			wantErr: "missing password",
+		},
+		{
+			name:    "invalid upstream protocol",
+			url:     URL{Hostname: "example.com", Addresses: []M.Socksaddr{addr}, Username: "user", Password: "pass", UpstreamProtocol: 0xFF},
+			wantErr: "invalid upstream protocol",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := tc.url.Build()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+func TestParse_ErrorCases(t *testing.T) {
+	t.Parallel()
+
+	buildLink := func(extra ...func(*bytes.Buffer)) string {
+		b := bytes.NewBuffer(nil)
+		for _, fn := range extra {
+			fn(b)
+		}
+		return Schema + "://?" + base64.RawURLEncoding.EncodeToString(b.Bytes())
+	}
+	withVersion := func(b *bytes.Buffer) { common.Must(writeTLV(b, TagVersion, Version)) }
+	withHostname := func(b *bytes.Buffer) { common.Must(writeTLV(b, TagHostname, "example.com")) }
+	withAddress := func(b *bytes.Buffer) { common.Must(writeTLV(b, TagAddresses, "1.2.3.4:443")) }
+	withUsername := func(b *bytes.Buffer) { common.Must(writeTLV(b, TagUsername, "user")) }
+	withPassword := func(b *bytes.Buffer) { common.Must(writeTLV(b, TagPassword, "pass")) }
+
+	testCases := []struct {
+		name    string
+		link    string
+		wantErr string
+	}{
+		{
+			name:    "missing hostname",
+			link:    buildLink(withVersion, withAddress, withUsername, withPassword),
+			wantErr: "missing hostname",
+		},
+		{
+			name:    "missing addresses",
+			link:    buildLink(withVersion, withHostname, withUsername, withPassword),
+			wantErr: "missing addresses",
+		},
+		{
+			name:    "missing username",
+			link:    buildLink(withVersion, withHostname, withAddress, withPassword),
+			wantErr: "missing username",
+		},
+		{
+			name:    "missing password",
+			link:    buildLink(withVersion, withHostname, withAddress, withUsername),
+			wantErr: "missing password",
+		},
+		{
+			name: "invalid address port zero",
+			link: buildLink(withVersion, withHostname, func(b *bytes.Buffer) {
+				common.Must(writeTLV(b, TagAddresses, "1.2.3.4:0"))
+			}, withUsername, withPassword),
+			wantErr: "invalid address",
+		},
+		{
+			name: "invalid upstream protocol",
+			link: buildLink(withVersion, withHostname, withAddress, withUsername, withPassword, func(b *bytes.Buffer) {
+				common.Must(writeTLV(b, TagUpstreamProtocol, byte(0xFF)))
+			}),
+			wantErr: "invalid upstream protocol",
+		},
+		{
+			name:    "invalid base64",
+			link:    Schema + "://?not!valid!base64!!",
+			wantErr: "",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := Parse(tc.link)
+			require.Error(t, err)
+			if tc.wantErr != "" {
+				assert.Contains(t, err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestIsValidVersion(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		version byte
+		valid   bool
+	}{
+		{Version0, true},
+		{Version1, true},
+		{2, false},
+		{0xFF, false},
+	}
+	for _, tc := range testCases {
+		t.Run(F.ToString(tc.version), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.valid, IsValidVersion(tc.version))
+		})
+	}
+}
+
+func TestUpstreamProtocol_IsValid(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		protocol UpstreamProtocol
+		valid    bool
+	}{
+		{UpstreamProtocolHTTP2, true},
+		{UpstreamProtocolHTTP3, true},
+		{0x00, false},
+		{0xFF, false},
+	}
+	for _, tc := range testCases {
+		t.Run(F.ToString(byte(tc.protocol)), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.valid, tc.protocol.IsValid())
+		})
+	}
+}
+
+func TestVarint_BoundaryValues(t *testing.T) {
+	t.Parallel()
+	testCases := []uint64{
+		0,
+		maxVarInt1,
+		maxVarInt1 + 1,
+		maxVarInt2,
+		maxVarInt2 + 1,
+		maxVarInt4,
+	}
+	for _, v := range testCases {
+		t.Run(F.ToString(v), func(t *testing.T) {
+			t.Parallel()
+			var buf bytes.Buffer
+			err := writeVarint(&buf, v)
+			require.NoError(t, err)
+			got, err := readVarint(&buf)
+			require.NoError(t, err)
+			assert.Equal(t, v, got)
+		})
+	}
 }
