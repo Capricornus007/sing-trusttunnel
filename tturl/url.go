@@ -189,7 +189,7 @@ func parseTag(buffer *buf.Buffer, url *URL, tag uint64) error {
 		}
 		upstreamProtocol := UpstreamProtocol(value)
 		if !upstreamProtocol.IsValid() {
-			return E.New("invalid upstream protocol: ", upstreamProtocol)
+			return E.New("invalid upstream protocol: ", byte(upstreamProtocol))
 		}
 		url.UpstreamProtocol = upstreamProtocol
 	case TagAntiDPI:
@@ -356,7 +356,7 @@ func (u URL) requireValid() error {
 		return E.New("missing password")
 	}
 	if !u.UpstreamProtocol.IsValid() {
-		return E.New("invalid upstream protocol ", u.UpstreamProtocol)
+		return E.New("invalid upstream protocol ", byte(u.UpstreamProtocol))
 	}
 	return nil
 }
