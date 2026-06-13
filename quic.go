@@ -17,7 +17,9 @@ import (
 	"github.com/sagernet/sing-quic/congestion_bbr2"
 	congestion_meta1 "github.com/sagernet/sing-quic/congestion_meta1"
 	congestion_meta2 "github.com/sagernet/sing-quic/congestion_meta2"
+	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
+	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/tls"
 )
 
@@ -36,13 +38,13 @@ func (c *Client) quicRoundTripper(tlsConfig tls.Config, congestionControlName st
 			Allow0RTT:                  false,
 		},
 		Dial: func(ctx context.Context, addr string, tlsCfg *stdTLS.Config, cfg *quic.Config) (*quic.Conn, error) {
-			packetConn, err := c.detour.ListenPacket(ctx, c.server)
+			conn, err := c.detour.DialContext(ctx, N.NetworkUDP, c.server)
 			if err != nil {
 				return nil, err
 			}
-			quicConn, err := quic.DialEarly(ctx, packetConn, c.server.UDPAddr(), tlsCfg, cfg)
+			quicConn, err := quic.DialEarly(ctx, bufio.NewUnbindPacketConn(conn), c.server.UDPAddr(), tlsCfg, cfg)
 			if err != nil {
-				_ = packetConn.Close()
+				_ = conn.Close()
 				return nil, err
 			}
 			setCongestionControl(c.timeFunc, quicConn, congestionControlName)
