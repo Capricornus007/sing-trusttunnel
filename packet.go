@@ -20,6 +20,33 @@ type packetConn struct {
 	readWaitOptions N.ReadWaitOptions
 }
 
+const (
+	packetAddressPortLen       = 16 + 2
+	packetLengthLen            = 4
+	packetAppNameLengthLen     = 1
+	clientPacketHeaderBaseLen  = packetLengthLen + packetAddressPortLen + packetAddressPortLen + packetAppNameLengthLen
+	serverPacketHeaderFixedLen = packetLengthLen + packetAddressPortLen + packetAddressPortLen
+)
+
+func packetAppName() string {
+	appName := AppName
+	if len(appName) > math.MaxUint8 {
+		appName = appName[:math.MaxUint8]
+	}
+	return appName
+}
+
+func clientPacketHeaderLen() int {
+	return clientPacketHeaderBaseLen + len(packetAppName())
+}
+
+func packetWriteBuffer(payload []byte, frontHeadroom int) *buf.Buffer {
+	buffer := buf.NewSize(frontHeadroom + len(payload))
+	buffer.Resize(frontHeadroom, 0)
+	common.Must1(buffer.Write(payload))
+	return buffer
+}
+
 func (c *packetConn) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
 	c.readWaitOptions = options
 	return false
@@ -36,7 +63,7 @@ type clientPacketConn struct {
 }
 
 func (u *clientPacketConn) FrontHeadroom() int {
-	return 4 + 16 + 2 + 16 + 2 + 1 + math.MaxUint8
+	return clientPacketHeaderLen()
 }
 
 func (u *clientPacketConn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
@@ -72,7 +99,7 @@ func (u *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 }
 
 func (u *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
-	err = u.WritePacket(buf.As(p), M.SocksaddrFromNet(addr))
+	err = u.WritePacket(packetWriteBuffer(p, clientPacketHeaderLen()), M.SocksaddrFromNet(addr))
 	if err != nil {
 		return 0, err
 	}
@@ -115,13 +142,10 @@ func (u *clientPacketConn) writePacketToServer(buffer *buf.Buffer, source M.Sock
 		}
 		source.Addr = ip
 	}
-	appName := AppName
-	if len(appName) > math.MaxUint8 {
-		appName = appName[:math.MaxUint8]
-	}
+	appName := packetAppName()
 	payloadLen := buffer.Len()
-	headerLen := 4 + 16 + 2 + 16 + 2 + 1 + len(appName)
-	lengthField := uint32(16 + 2 + 16 + 2 + 1 + len(appName) + payloadLen)
+	headerLen := clientPacketHeaderBaseLen + len(appName)
+	lengthField := uint32(packetAddressPortLen + packetAddressPortLen + packetAppNameLengthLen + len(appName) + payloadLen)
 	destinationAddress := buildPaddingIP(source.Addr)
 
 	var (
@@ -169,7 +193,7 @@ type serverPacketConn struct {
 }
 
 func (u *serverPacketConn) FrontHeadroom() int {
-	return 4 + 16 + 2 + 16 + 2
+	return serverPacketHeaderFixedLen
 }
 
 func (u *serverPacketConn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
@@ -205,7 +229,7 @@ func (u *serverPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 }
 
 func (u *serverPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
-	err = u.WritePacket(buf.As(p), M.SocksaddrFromNet(addr))
+	err = u.WritePacket(packetWriteBuffer(p, serverPacketHeaderFixedLen), M.SocksaddrFromNet(addr))
 	if err != nil {
 		return 0, err
 	}
@@ -255,8 +279,8 @@ func (u *serverPacketConn) writePacketToClient(buffer *buf.Buffer, source M.Sock
 		return E.New("only support IP")
 	}
 	payloadLen := buffer.Len()
-	headerLen := 4 + 16 + 2 + 16 + 2
-	lengthField := uint32(16 + 2 + 16 + 2 + payloadLen)
+	headerLen := serverPacketHeaderFixedLen
+	lengthField := uint32(packetAddressPortLen + packetAddressPortLen + payloadLen)
 	sourceAddress := buildPaddingIP(source.Addr)
 	var destinationAddress [16]byte
 	var destinationPort uint16

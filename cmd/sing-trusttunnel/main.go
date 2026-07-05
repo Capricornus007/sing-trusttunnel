@@ -165,7 +165,8 @@ func parseConfig[T any](path string) (*T, error) {
 var _ tls.ServerConfig = (*TLSConfig)(nil)
 
 type TLSConfig struct {
-	config *stdTLS.Config
+	config           *stdTLS.Config
+	handshakeTimeout time.Duration
 }
 
 func (t *TLSConfig) ServerName() string {
@@ -184,6 +185,14 @@ func (t *TLSConfig) SetNextProtos(nextProto []string) {
 	t.config.NextProtos = slices.Clone(nextProto)
 }
 
+func (t *TLSConfig) HandshakeTimeout() time.Duration {
+	return t.handshakeTimeout
+}
+
+func (t *TLSConfig) SetHandshakeTimeout(timeout time.Duration) {
+	t.handshakeTimeout = timeout
+}
+
 func (t *TLSConfig) STDConfig() (*tls.STDConfig, error) {
 	return t.config, nil
 }
@@ -194,7 +203,8 @@ func (t *TLSConfig) Client(conn net.Conn) (tls.Conn, error) {
 
 func (t *TLSConfig) Clone() tls.Config {
 	return &TLSConfig{
-		config: t.config.Clone(),
+		config:           t.config.Clone(),
+		handshakeTimeout: t.handshakeTimeout,
 	}
 }
 

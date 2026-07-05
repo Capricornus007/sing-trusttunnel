@@ -35,6 +35,8 @@ func (c *testClientTLSConfig) ServerName() string                 { return c.con
 func (c *testClientTLSConfig) SetServerName(serverName string)    { c.config.ServerName = serverName }
 func (c *testClientTLSConfig) NextProtos() []string               { return c.config.NextProtos }
 func (c *testClientTLSConfig) SetNextProtos(p []string)           { c.config.NextProtos = p }
+func (c *testClientTLSConfig) HandshakeTimeout() time.Duration    { return 0 }
+func (c *testClientTLSConfig) SetHandshakeTimeout(time.Duration)  {}
 func (c *testClientTLSConfig) STDConfig() (*stdtls.Config, error) { return c.config, nil }
 func (c *testClientTLSConfig) Client(conn net.Conn) (tls.Conn, error) {
 	return stdtls.Client(conn, c.config), nil
@@ -51,6 +53,8 @@ func (s *testServerTLSConfig) ServerName() string                 { return s.con
 func (s *testServerTLSConfig) SetServerName(serverName string)    { s.config.ServerName = serverName }
 func (s *testServerTLSConfig) NextProtos() []string               { return s.config.NextProtos }
 func (s *testServerTLSConfig) SetNextProtos(p []string)           { s.config.NextProtos = p }
+func (s *testServerTLSConfig) HandshakeTimeout() time.Duration    { return 0 }
+func (s *testServerTLSConfig) SetHandshakeTimeout(time.Duration)  {}
 func (s *testServerTLSConfig) STDConfig() (*stdtls.Config, error) { return s.config, nil }
 func (s *testServerTLSConfig) Client(conn net.Conn) (tls.Conn, error) {
 	return stdtls.Client(conn, s.config), nil

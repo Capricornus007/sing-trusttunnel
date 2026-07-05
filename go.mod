@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/sagernet/quic-go v0.59.0-sing-box-mod.5
-	github.com/sagernet/sing v0.8.9
+	github.com/sagernet/sing v0.8.12-0.20260702081104-2ded2af32d3d
 	github.com/sagernet/sing-quic v0.6.1
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/net v0.44.0
@@ -16,7 +16,7 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	golang.org/x/crypto v0.42.0 // indirect
 	golang.org/x/exp v0.0.0-20250911091902-df9299821621 // indirect
-	golang.org/x/sys v0.36.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
