@@ -20,9 +20,6 @@ import (
 	"github.com/sagernet/sing/common/ntp"
 	"github.com/sagernet/sing/common/tls"
 	sHttp "github.com/sagernet/sing/protocol/http"
-
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 type HandlerEx interface {
@@ -50,7 +47,6 @@ type Service struct {
 	icmpHandler           ICMPHandler
 	quicCongestionControl string
 	httpServer            *http.Server
-	h2Server              *http2.Server
 	h3Server              io.Closer
 	tcpListener           net.Listener
 	tlsListener           net.Listener
@@ -85,21 +81,20 @@ func wrapErrorFromContext(ctx context.Context) func(error) error {
 
 func (s *Service) Start(tcpListener net.Listener, udpConn net.PacketConn, tlsConfig tls.ServerConfig) error {
 	if tcpListener != nil {
-		h2Server := &http2.Server{}
+		protocol := new(http.Protocols)
+		protocol.SetHTTP1(false)
+		protocol.SetHTTP2(true)
+		protocol.SetUnencryptedHTTP2(true)
 		s.httpServer = &http.Server{
-			Handler:     h2c.NewHandler(s, h2Server),
+			Handler:     s,
 			IdleTimeout: DefaultSessionTimeout,
 			BaseContext: func(net.Listener) context.Context {
 				ctx := s.ctx
 				ctx = contextWithWrapError(ctx, baderror.WrapH2)
 				return ctx
 			},
+			Protocols: protocol,
 		}
-		err := http2.ConfigureServer(s.httpServer, h2Server)
-		if err != nil {
-			return err
-		}
-		s.h2Server = h2Server
 		listener := tcpListener
 		s.tcpListener = tcpListener
 		if tlsConfig != nil {
@@ -141,7 +136,6 @@ func (s *Service) Close() error {
 			shutdownErr = nil
 		}
 	}
-	forceCloseAllH2ServerConnections(s.h2Server)
 	closeErr := common.Close(
 		common.PtrOrNil(s.httpServer),
 		s.tlsListener,
