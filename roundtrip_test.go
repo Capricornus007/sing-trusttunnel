@@ -334,10 +334,8 @@ func TestRoundtripTCPConcurrent(t *testing.T) {
 
 	const numStreams = 20
 	var waitGroup sync.WaitGroup
-	waitGroup.Add(numStreams)
 	for range numStreams {
-		go func() {
-			defer waitGroup.Done()
+		waitGroup.Go(func() {
 			conn, err := s.client.Dial(context.Background(), M.ParseSocksaddr("example.com:80"))
 			if !assert.NoError(t, err) {
 				return
@@ -354,7 +352,7 @@ func TestRoundtripTCPConcurrent(t *testing.T) {
 				return
 			}
 			assert.Equal(t, msg, got)
-		}()
+		})
 	}
 	waitGroup.Wait()
 }
@@ -370,10 +368,8 @@ func TestRoundtripUDPConcurrent(t *testing.T) {
 	payload := []byte("concurrent udp echo")
 
 	var waitGroup sync.WaitGroup
-	waitGroup.Add(numConns)
 	for range numConns {
-		go func() {
-			defer waitGroup.Done()
+		waitGroup.Go(func() {
 			pktConn, err := s.client.ListenPacket(context.Background())
 			if !assert.NoError(t, err) {
 				return
@@ -390,7 +386,7 @@ func TestRoundtripUDPConcurrent(t *testing.T) {
 				return
 			}
 			assert.Equal(t, payload, got[:n])
-		}()
+		})
 	}
 	waitGroup.Wait()
 }
