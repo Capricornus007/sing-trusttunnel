@@ -218,7 +218,7 @@ func newTestSetupWithTLS(t *testing.T, serverTLS tls.ServerConfig, clientTLS tls
 	require.NoError(t, err)
 
 	service := NewService(ServiceOptions{
-		Ctx:     context.Background(),
+		Ctx:     t.Context(),
 		Logger:  logger.NOP(),
 		Handler: &echoHandler{},
 	})
@@ -227,7 +227,7 @@ func newTestSetupWithTLS(t *testing.T, serverTLS tls.ServerConfig, clientTLS tls
 
 	addr := listener.Addr().String()
 	client, err := NewClient(ClientOptions{
-		Ctx:       context.Background(),
+		Ctx:       t.Context(),
 		Detour:    new(N.DefaultDialer),
 		Server:    M.ParseSocksaddr(addr),
 		Auth:      auth.User{Username: "test", Password: "test"},
@@ -248,7 +248,7 @@ func TestRoundtripHealthCheck(t *testing.T) {
 	t.Parallel()
 	s := newTestSetup(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, s.client.HealthCheck(ctx))
 }
@@ -290,7 +290,7 @@ func TestRoundtripTCP(t *testing.T) {
 	t.Parallel()
 	s := newTestSetup(t)
 
-	conn, err := s.client.Dial(context.Background(), M.ParseSocksaddr("example.com:80"))
+	conn, err := s.client.Dial(t.Context(), M.ParseSocksaddr("example.com:80"))
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -308,7 +308,7 @@ func TestRoundtripUDP(t *testing.T) {
 	t.Parallel()
 	s := newTestSetup(t)
 
-	conn, err := s.client.ListenPacket(context.Background())
+	conn, err := s.client.ListenPacket(t.Context())
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -336,7 +336,7 @@ func TestRoundtripTCPConcurrent(t *testing.T) {
 	var waitGroup sync.WaitGroup
 	for range numStreams {
 		waitGroup.Go(func() {
-			conn, err := s.client.Dial(context.Background(), M.ParseSocksaddr("example.com:80"))
+			conn, err := s.client.Dial(t.Context(), M.ParseSocksaddr("example.com:80"))
 			if !assert.NoError(t, err) {
 				return
 			}
@@ -370,7 +370,7 @@ func TestRoundtripUDPConcurrent(t *testing.T) {
 	var waitGroup sync.WaitGroup
 	for range numConns {
 		waitGroup.Go(func() {
-			pktConn, err := s.client.ListenPacket(context.Background())
+			pktConn, err := s.client.ListenPacket(t.Context())
 			if !assert.NoError(t, err) {
 				return
 			}
