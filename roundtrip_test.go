@@ -124,6 +124,8 @@ func (c *fakeTLSConfig) Server(conn net.Conn) (tls.Conn, error) {
 	return &fakeTLSConn{Conn: conn}, nil
 }
 
+var _ duckTLSConn = (*fakeTLSConn)(nil)
+
 type fakeTLSConn struct {
 	net.Conn
 }
@@ -208,10 +210,15 @@ func newTestSetup(t *testing.T) *testSetup {
 	t.Helper()
 
 	serverStd, clientStd := generateTestTLSPair(t)
-	return newTestSetupWithTLS(t, &testServerTLSConfig{config: serverStd}, &testClientTLSConfig{config: clientStd})
+	return newTestSetupWith(t, &testServerTLSConfig{config: serverStd}, &testClientTLSConfig{config: clientStd}, new(N.DefaultDialer))
 }
 
 func newTestSetupWithTLS(t *testing.T, serverTLS tls.ServerConfig, clientTLS tls.Config) *testSetup {
+	t.Helper()
+	return newTestSetupWith(t, serverTLS, clientTLS, new(N.DefaultDialer))
+}
+
+func newTestSetupWith(t *testing.T, serverTLS tls.ServerConfig, clientTLS tls.Config, detour N.Dialer) *testSetup {
 	t.Helper()
 
 	listener, err := net.Listen(N.NetworkTCP, "127.0.0.1:0")
@@ -228,7 +235,7 @@ func newTestSetupWithTLS(t *testing.T, serverTLS tls.ServerConfig, clientTLS tls
 	addr := listener.Addr().String()
 	client, err := NewClient(ClientOptions{
 		Ctx:       t.Context(),
-		Detour:    new(N.DefaultDialer),
+		Detour:    detour,
 		Server:    M.ParseSocksaddr(addr),
 		Auth:      auth.User{Username: "test", Password: "test"},
 		TLSConfig: clientTLS,

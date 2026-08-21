@@ -72,6 +72,8 @@ type Client struct {
 	userAgents       ClientUserAgents
 	timeFunc         func() time.Time
 	resolveFunc      func(fqdn string) (netip.Addr, error)
+
+	connTracker *connTracker // to force close conn for h2
 }
 
 func NewClient(options ClientOptions) (client *Client, err error) {
@@ -115,6 +117,7 @@ func NewClient(options ClientOptions) (client *Client, err error) {
 }
 
 func (c *Client) h2RoundTripper(tlsConfig tls.Config) {
+	c.connTracker = newConnTracker()
 	c.roundTripper = &http2.Transport{
 		DialTLSContext: func(ctx context.Context, network, addr string, cfg *stdTLS.Config) (net.Conn, error) {
 			conn, err := c.detour.DialContext(ctx, N.NetworkTCP, c.server)
@@ -126,7 +129,7 @@ func (c *Client) h2RoundTripper(tlsConfig tls.Config) {
 				_ = conn.Close()
 				return nil, err
 			}
-			return tlsConn, nil
+			return c.connTracker.track(tlsConn), nil
 		},
 		AllowHTTP:       false,
 		IdleConnTimeout: DefaultSessionTimeout,
@@ -292,7 +295,7 @@ func (c *Client) ListenICMP(ctx context.Context) (*IcmpConn, error) {
 }
 
 func (c *Client) Close() error {
-	forceCloseAllConnections(c.roundTripper)
+	c.forceCloseAllConnections()
 	if c.healthCheckTimer != nil {
 		c.healthCheckTimer.Stop()
 	}
@@ -300,7 +303,7 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) ResetConnections() {
-	forceCloseAllConnections(c.roundTripper)
+	c.forceCloseAllConnections()
 	c.resetHealthCheckTimer()
 }
 
