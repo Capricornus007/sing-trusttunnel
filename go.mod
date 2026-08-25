@@ -1,6 +1,6 @@
 module github.com/xchacha20-poly1305/sing-trusttunnel
 
-go 1.25.0
+go 1.27.0
 
 require (
 	github.com/sagernet/quic-go v0.61.0-sing-box-mod.2
