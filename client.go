@@ -186,11 +186,9 @@ func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, e
 	request.Header.Add("User-Agent", c.userAgents.TCPUserAgent)
 	request.Header.Add("Proxy-Authorization", c.auth)
 	conn := &tcpConn{
-		httpConn: httpConn{
-			writer:    pipeWriter,
-			wrapError: c.wrapError,
-			created:   make(chan struct{}),
-		},
+		writer:    pipeWriter,
+		wrapError: c.wrapError,
+		created:   make(chan struct{}),
 	}
 	requestCtx, cancel := context.WithCancel(c.ctx)
 	conn.closeHook = cancel
@@ -223,14 +221,10 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	request.Header.Add("User-Agent", c.userAgents.UDPUserAgent)
 	request.Header.Add("Proxy-Authorization", c.auth)
 	conn := &clientPacketConn{
-		packetConn: packetConn{
-			httpConn: httpConn{
-				writer:    pipeWriter,
-				wrapError: c.wrapError,
-				created:   make(chan struct{}),
-			},
-			resolveFunc: c.resolveFunc,
-		},
+		writer:      pipeWriter,
+		wrapError:   c.wrapError,
+		created:     make(chan struct{}),
+		resolveFunc: c.resolveFunc,
 	}
 	requestCtx, cancel := context.WithCancel(c.ctx)
 	conn.closeHook = cancel
