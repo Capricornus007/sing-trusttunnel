@@ -24,4 +24,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/sagernet/sing-quic => ../sing-quic
+replace github.com/sagernet/sing-quic => github.com/Capricornus007/sing-quic v0.6.4-0.20260828054750-f2d9d4b93a5b
