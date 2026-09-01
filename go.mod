@@ -3,11 +3,11 @@ module github.com/xchacha20-poly1305/sing-trusttunnel
 go 1.27.0
 
 require (
-	github.com/sagernet/quic-go v0.61.0-sing-box-mod.6
+	github.com/sagernet/quic-go v0.61.0-sing-box-mod.7
 	github.com/sagernet/sing v0.9.0-beta.4
 	github.com/sagernet/sing-quic v0.7.0-beta.1
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/net v0.56.0
+	golang.org/x/net v0.57.0
 )
 
 require (
@@ -24,4 +24,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/sagernet/sing-quic => github.com/Capricornus007/sing-quic v0.6.4-0.20260828054750-f2d9d4b93a5b
+replace github.com/sagernet/sing-quic => github.com/Capricornus007/sing-quic v0.6.4-0.20260901065507-dce38ce71fc6
