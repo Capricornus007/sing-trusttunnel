@@ -225,11 +225,9 @@ func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	request.Header.Add("User-Agent", c.userAgents.UDPUserAgent)
 	request.Header.Add("Proxy-Authorization", c.auth)
 	conn := &clientUDPConn{
-		httpConn: httpConn{
-			writer:    pipeWriter,
-			wrapError: c.wrapError,
-			created:   make(chan struct{}),
-		},
+		writer:      pipeWriter,
+		wrapError:   c.wrapError,
+		created:     make(chan struct{}),
 		resolveFunc: c.resolveFunc,
 		appName:     c.userAgents.AppName,
 	}
