@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/sagernet/sing/common/auth"
-	sHttp "github.com/sagernet/sing/protocol/http"
+	sHTTP "github.com/sagernet/sing/protocol/http"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,7 +78,7 @@ func TestBuildPaddingIP(t *testing.T) {
 func TestBuildAuth(t *testing.T) {
 	t.Parallel()
 	user := auth.User{Username: "alice", Password: "s3cr3t"}
-	username, password, ok := sHttp.ParseBasicAuth(buildAuth(user))
+	username, password, ok := sHTTP.ParseBasicAuth(buildAuth(user))
 	require.True(t, ok)
 	assert.Equal(t, user.Username, username)
 	assert.Equal(t, user.Password, password)
