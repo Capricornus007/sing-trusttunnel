@@ -9,10 +9,10 @@ import (
 	"net/netip"
 	"net/url"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
-	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
 	"github.com/sagernet/sing/common/baderror"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -107,7 +107,7 @@ func NewClient(options ClientOptions) (client *Client, err error) {
 		if len(nextProtos) == 0 {
 			nextProtos = []string{"h3"}
 			options.TLSConfig.SetNextProtos(nextProtos)
-		} else if !common.Contains(nextProtos, "h3") {
+		} else if !slices.Contains(nextProtos, "h3") {
 			return nil, E.New("require alpn h3")
 		}
 		err = client.quicRoundTripper(options.TLSConfig, options.QUICCongestionControl)
@@ -122,7 +122,7 @@ func NewClient(options ClientOptions) (client *Client, err error) {
 		if len(nextProtos) == 0 {
 			nextProtos = []string{http2.NextProtoTLS}
 			options.TLSConfig.SetNextProtos(nextProtos)
-		} else if !common.Contains(nextProtos, http2.NextProtoTLS) {
+		} else if !slices.Contains(nextProtos, http2.NextProtoTLS) {
 			return nil, E.New("require alpn h2")
 		}
 		client.h2RoundTripper(options.TLSConfig)
