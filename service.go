@@ -19,7 +19,7 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/ntp"
 	"github.com/sagernet/sing/common/tls"
-	sHttp "github.com/sagernet/sing/protocol/http"
+	sHTTP "github.com/sagernet/sing/protocol/http"
 )
 
 type HandlerEx interface {
@@ -256,7 +256,7 @@ func (s *Service) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Service) verify(authorization string) (username string, loaded bool) {
-	username, password, loaded := sHttp.ParseBasicAuth(authorization)
+	username, password, loaded := sHTTP.ParseBasicAuth(authorization)
 	if !loaded {
 		return "", false
 	}
