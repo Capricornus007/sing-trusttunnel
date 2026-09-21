@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sagernet/sing/common"
+	"github.com/sagernet/sing/common/buf"
 	F "github.com/sagernet/sing/common/format"
 	M "github.com/sagernet/sing/common/metadata"
 
@@ -354,7 +355,7 @@ func TestBuild_DNSUpstreamsEncodedAsSingleStringArrayTLV(t *testing.T) {
 	dnsValues := decodeTLVValues(t, payload, TagDNSUpstreams)
 	require.Len(t, dnsValues, 1)
 
-	reader := bytes.NewReader(dnsValues[0])
+	reader := buf.As(dnsValues[0])
 	firstLength, err := readVarint(reader)
 	require.NoError(t, err)
 	require.EqualValues(t, len("1.1.1.1"), firstLength)
@@ -492,7 +493,7 @@ func assertAddressesEqual(t *testing.T, got []M.Socksaddr, want []M.Socksaddr) {
 
 func decodeTLVTags(t *testing.T, link string) []uint64 {
 	t.Helper()
-	reader := bytes.NewReader(decodeTLVPayload(t, link))
+	reader := buf.As(decodeTLVPayload(t, link))
 	tags := make([]uint64, 0, 8)
 	for {
 		tag, err := readVarint(reader)
@@ -507,8 +508,7 @@ func decodeTLVTags(t *testing.T, link string) []uint64 {
 		require.NoError(t, err)
 
 		tags = append(tags, tag)
-		_, err = reader.Seek(int64(length), io.SeekCurrent)
-		require.NoError(t, err)
+		reader.Advance(int(length))
 	}
 
 	return tags
@@ -527,7 +527,7 @@ func decodeTLVPayload(t *testing.T, link string) []byte {
 
 func decodeTLVValues(t *testing.T, payload []byte, targetTag uint64) [][]byte {
 	t.Helper()
-	reader := bytes.NewReader(payload)
+	reader := buf.As(payload)
 	var values [][]byte
 	for {
 		tag, err := readVarint(reader)
@@ -707,25 +707,32 @@ func TestUpstreamProtocol_IsValid(t *testing.T) {
 	}
 }
 
-func TestVarint_BoundaryValues(t *testing.T) {
+func TestParse_TruncatedVarint(t *testing.T) {
 	t.Parallel()
-	testCases := []uint64{
-		0,
-		maxVarInt1,
-		maxVarInt1 + 1,
-		maxVarInt2,
-		maxVarInt2 + 1,
-		maxVarInt4,
+	_, err := Parse(Schema + "://?" + base64.RawURLEncoding.EncodeToString([]byte{0x80, 0x00}))
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
+func BenchmarkBuild(b *testing.B) {
+	url := URL{
+		Hostname:           "vpn.example.com",
+		Addresses:          []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+		CustomSNI:          "sni.example.com",
+		Username:           "user",
+		Password:           "pass",
+		SkipVerification:   true,
+		Certificate:        make([]byte, 1024),
+		UpstreamProtocol:   UpstreamProtocolHTTP3,
+		AntiDPI:            true,
+		ClientRandomPrefix: "prefix",
+		Name:               "name",
+		DNSUpstreams:       []string{"1.1.1.1", "tls://dns.example.com"},
 	}
-	for _, v := range testCases {
-		t.Run(F.ToString(v), func(t *testing.T) {
-			t.Parallel()
-			var buf bytes.Buffer
-			err := writeVarint(&buf, v)
-			require.NoError(t, err)
-			got, err := readVarint(&buf)
-			require.NoError(t, err)
-			assert.Equal(t, v, got)
-		})
+	b.ReportAllocs()
+	for b.Loop() {
+		_, err := url.Build()
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }

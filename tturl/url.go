@@ -4,7 +4,6 @@ package tturl
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/binary"
 	"io"
 	"strings"
 
@@ -291,22 +290,14 @@ func readTLVStringArray(buffer *buf.Buffer, tag uint64) ([]string, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
-	reader := bytes.NewReader(data)
+	arrayBuffer := buf.As(data)
 	var result []string
-	for reader.Len() > 0 {
-		length, err := readVarint(reader)
+	for !arrayBuffer.IsEmpty() {
+		item, err := readTLVString(arrayBuffer, tag)
 		if err != nil {
-			return nil, err
+			return nil, E.Cause(err, "read string array item ", len(result))
 		}
-		if length > uint64(reader.Len()) {
-			return nil, E.New("invalid string array length of tag ", tag, ": ", length, ", remaining: ", reader.Len())
-		}
-		item := make([]byte, int(length))
-		_, err = io.ReadFull(reader, item)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, string(item))
+		result = append(result, item)
 	}
 	return result, nil
 }
@@ -442,119 +433,54 @@ func (u URL) Build() (string, error) {
 	return Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes()), nil
 }
 
-func writeTLV(writer io.Writer, tag uint64, data any) (err error) {
-	err = writeVarint(writer, tag)
+func writeTLV(buffer *bytes.Buffer, tag uint64, data any) error {
+	err := writeVarint(buffer, tag)
 	if err != nil {
-		return
+		return err
 	}
 	switch data := data.(type) {
 	case byte:
-		_, err = writer.Write([]byte{1, data})
-		return
+		buffer.WriteByte(1)
+		buffer.WriteByte(data)
 	case bool:
-		buffer := [2]byte{1, 0}
+		buffer.WriteByte(1)
 		if data {
-			buffer[1] = 0x01
+			buffer.WriteByte(0x01)
 		} else {
-			buffer[1] = 0x00
+			buffer.WriteByte(0x00)
 		}
-		_, err = writer.Write(buffer[:])
-		return
 	case string:
-		length := uint64(len(data))
-		err = writeVarint(writer, length)
+		err = writeVarint(buffer, uint64(len(data)))
 		if err != nil {
-			return
+			return err
 		}
-		_, err = io.WriteString(writer, data)
-		return
+		buffer.WriteString(data)
 	case []byte:
-		length := uint64(len(data))
-		err = writeVarint(writer, length)
+		err = writeVarint(buffer, uint64(len(data)))
 		if err != nil {
-			return
+			return err
 		}
-		_, err = writer.Write(data)
-		return
+		buffer.Write(data)
 	case []string:
-		var buffer bytes.Buffer
+		var length int
 		for i, value := range data {
-			err = writeVarint(&buffer, uint64(len(value)))
+			itemLengthSize, err := varintLength(uint64(len(value)))
 			if err != nil {
 				return E.Cause(err, "write string array length ", i)
 			}
-			_, err = io.WriteString(&buffer, value)
-			if err != nil {
-				return E.Cause(err, "write string array ", i)
-			}
+			length += itemLengthSize + len(value)
 		}
-		err = writeVarint(writer, uint64(buffer.Len()))
+		err = writeVarint(buffer, uint64(length))
 		if err != nil {
 			return E.Cause(err, "write string array tlv length")
 		}
-		_, err = writer.Write(buffer.Bytes())
-		return
+		for _, value := range data {
+			// Lengths are validated by the loop above.
+			_ = writeVarint(buffer, uint64(len(value)))
+			buffer.WriteString(value)
+		}
 	default:
 		panic("unexpected data type")
 	}
-}
-
-const (
-	maxVarInt1 = 63
-	maxVarInt2 = 16383
-	maxVarInt4 = 1073741823
-	maxVarInt8 = 4611686018427387903
-)
-
-func writeVarint(writer io.Writer, value uint64) error {
-	var encodedBytes []byte
-	var scratch [8]byte
-	switch {
-	case value <= maxVarInt1:
-		scratch[0] = byte(value)
-		encodedBytes = scratch[:1]
-	case value <= maxVarInt2:
-		binary.BigEndian.PutUint16(scratch[:2], uint16(value))
-		scratch[0] |= 0x40 // 01xxxxxx
-		encodedBytes = scratch[:2]
-	case value <= maxVarInt4:
-		binary.BigEndian.PutUint32(scratch[:4], uint32(value))
-		scratch[0] |= 0x80 // 10xxxxxx
-		encodedBytes = scratch[:4]
-	case value <= maxVarInt8:
-		binary.BigEndian.PutUint64(scratch[:8], value)
-		scratch[0] |= 0xc0 // 11xxxxxx
-		encodedBytes = scratch[:8]
-	default:
-		return E.New("varint too large: ", value)
-	}
-	return common.Error(writer.Write(encodedBytes))
-}
-
-func readVarint(reader io.Reader) (uint64, error) {
-	var scratch [8]byte
-	_, err := io.ReadFull(reader, scratch[:1])
-	if err != nil {
-		return 0, err
-	}
-	sizeCode := scratch[0] >> 6
-	byteLength := 1 << sizeCode
-	scratch[0] &= 0x3f
-	if byteLength == 1 {
-		return uint64(scratch[0]), nil
-	}
-	_, err = io.ReadFull(reader, scratch[1:byteLength])
-	if err != nil {
-		return 0, err
-	}
-	switch byteLength {
-	case 2:
-		return uint64(binary.BigEndian.Uint16(scratch[:2])), nil
-	case 4:
-		return uint64(binary.BigEndian.Uint32(scratch[:4])), nil
-	case 8:
-		return binary.BigEndian.Uint64(scratch[:8]), nil
-	default:
-		return 0, E.New("impossible varint length: ", byteLength)
-	}
+	return nil
 }
