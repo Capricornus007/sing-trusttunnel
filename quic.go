@@ -93,6 +93,7 @@ func (s *Service) configHTTP3Server(tlsConfig tls.ServerConfig, packetConn net.P
 		},
 	}
 	s.h3Server = h3Server
+	s.quicListener = quicListener
 	s.packetConn = packetConn
 	go func() {
 		sErr := h3Server.ServeListener(quicListener)
