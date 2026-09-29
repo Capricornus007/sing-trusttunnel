@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing/common"
@@ -31,6 +32,11 @@ type ICMPHandler interface {
 	NewICMPConnection(ctx context.Context, conn *IcmpConn, onClose N.CloseHandlerFunc)
 }
 
+type shutdowner interface {
+	Shutdown(ctx context.Context) error
+	io.Closer
+}
+
 type ServiceOptions struct {
 	Ctx                   context.Context
 	Logger                logger.ContextLogger
@@ -47,9 +53,10 @@ type Service struct {
 	icmpHandler           ICMPHandler
 	quicCongestionControl string
 	httpServer            *http.Server
-	h3Server              io.Closer
+	h3Server              shutdowner
 	tcpListener           net.Listener
 	tlsListener           net.Listener
+	quicListener          io.Closer
 	packetConn            net.PacketConn
 	timeFunc              func() time.Time
 }
@@ -126,24 +133,42 @@ func (s *Service) UpdateUsers(users []auth.User) {
 }
 
 func (s *Service) Close() error {
-	var shutdownErr error
-	if s.httpServer != nil {
-		const shutdownTimeout = 5 * time.Second
-		ctx, cancel := context.WithTimeout(s.ctx, shutdownTimeout)
-		shutdownErr = s.httpServer.Shutdown(ctx)
-		cancel()
-		if errors.Is(shutdownErr, http.ErrServerClosed) {
-			shutdownErr = nil
-		}
-	}
+	shutdownErr := s.shutdownServers()
 	closeErr := common.Close(
 		common.PtrOrNil(s.httpServer),
 		s.tlsListener,
 		s.tcpListener,
-		s.h3Server,
+		// No need to close h3 server, which will be closed in Shutdown().
+		s.quicListener,
 		s.packetConn,
 	)
 	return E.Errors(shutdownErr, closeErr)
+}
+
+func (s *Service) shutdownServers() error {
+	var servers []shutdowner
+	if s.httpServer != nil {
+		servers = append(servers, s.httpServer)
+	}
+	if s.h3Server != nil {
+		servers = append(servers, s.h3Server)
+	}
+	const shutdownTimeout = 5 * time.Second
+	ctx, cancel := context.WithTimeout(s.ctx, shutdownTimeout)
+	defer cancel()
+	errs := make([]error, len(servers))
+	var waitGroup sync.WaitGroup
+	for i, server := range servers {
+		waitGroup.Go(func() {
+			err := server.Shutdown(ctx)
+			if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
+				err = nil
+			}
+			errs[i] = err
+		})
+	}
+	waitGroup.Wait()
+	return E.Errors(errs...)
 }
 
 func (s *Service) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
