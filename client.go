@@ -254,10 +254,8 @@ func (c *Client) Dial(ctx context.Context, destination M.Socksaddr) (net.Conn, e
 
 func (c *Client) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	conn := &clientUDPConn{
-		udpConn: udpConn{
-			resolveFunc: c.resolveFunc,
-		},
-		appName: c.userAgents.AppName,
+		resolveFunc: c.resolveFunc,
+		appName:     c.userAgents.AppName,
 	}
 	err := c.openStream(ctx, UDPMagicAddress, c.userAgents.UDPUserAgent, &conn.httpConn)
 	if err != nil {

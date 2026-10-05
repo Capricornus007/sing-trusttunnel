@@ -290,7 +290,7 @@ type blockingHandshakeConfig struct {
 func (c *blockingHandshakeConfig) HandshakeTimeout() time.Duration { return c.timeout }
 
 func (c *blockingHandshakeConfig) Client(conn net.Conn) (tls.Conn, error) {
-	return &blockingHandshakeConn{fakeTLSConn: fakeTLSConn{Conn: conn}}, nil
+	return &blockingHandshakeConn{Conn: conn}, nil
 }
 
 type blockingHandshakeConn struct {

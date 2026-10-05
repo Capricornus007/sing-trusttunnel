@@ -198,14 +198,10 @@ func (s *Service) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			flusher.Flush()
 		}
 		conn := &serverUDPConn{
-			udpConn: udpConn{
-				httpConn: httpConn{
-					writer:    writer,
-					flusher:   flusher,
-					wrapError: wrapErrorFromContext(ctx),
-					created:   make(chan struct{}),
-				},
-			},
+			writer:    writer,
+			flusher:   flusher,
+			wrapError: wrapErrorFromContext(ctx),
+			created:   make(chan struct{}),
 		}
 		conn.setUp(request.Body, nil)
 		firstPacket := buf.NewPacket()

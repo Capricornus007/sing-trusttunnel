@@ -272,8 +272,6 @@ func (r *Router) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, s
 
 func newDefaultDialer() N.Dialer {
 	return &N.DefaultDialer{
-		Dialer: net.Dialer{
-			Timeout: DefaultTCPTimeout,
-		},
+		Timeout: DefaultTCPTimeout,
 	}
 }
