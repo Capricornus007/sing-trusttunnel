@@ -4,11 +4,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/sagernet/sing/common/auth"
-	sHTTP "github.com/sagernet/sing/protocol/http"
-
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestParse16BytesIP(t *testing.T) {
@@ -73,13 +69,4 @@ func TestBuildPaddingIP(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestBuildAuth(t *testing.T) {
-	t.Parallel()
-	user := auth.User{Username: "alice", Password: "s3cr3t"}
-	username, password, ok := sHTTP.ParseBasicAuth(buildAuth(user))
-	require.True(t, ok)
-	assert.Equal(t, user.Username, username)
-	assert.Equal(t, user.Password, password)
 }

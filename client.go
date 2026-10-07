@@ -80,7 +80,7 @@ type Client struct {
 	ctx          context.Context
 	detour       N.Dialer
 	server       M.Socksaddr
-	auth         string
+	auth         auth.User
 	roundTripper RoundTripper
 	idle         *idleManager
 	healthCheck  *healthCheckScheduler
@@ -97,7 +97,7 @@ func NewClient(options ClientOptions) (client *Client, err error) {
 	client = &Client{
 		detour:      options.Detour,
 		server:      options.Server,
-		auth:        buildAuth(options.Auth),
+		auth:        options.Auth,
 		userAgents:  options.UserAgents,
 		resolveFunc: options.ResolveFunc,
 	}
@@ -176,8 +176,7 @@ func (c *Client) dialTLS(ctx context.Context, tlsConfig tls.Config) (net.Conn, e
 func (c *Client) buildRequest(host, userAgent string, body io.ReadCloser) *http.Request {
 	header := make(http.Header)
 	header.Add("User-Agent", userAgent)
-	header.Add("Proxy-Authorization", c.auth)
-	return &http.Request{
+	request := &http.Request{
 		Method: http.MethodConnect,
 		URL: &url.URL{
 			Scheme: "https",
@@ -187,6 +186,8 @@ func (c *Client) buildRequest(host, userAgent string, body io.ReadCloser) *http.
 		Body:   body,
 		Host:   host,
 	}
+	request.SetBasicAuth(c.auth.Username, c.auth.Password)
+	return request
 }
 
 // openStream opens a new stream based on h2/h3. ctx is only for controlling cancel.
