@@ -5,9 +5,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"io"
+	"slices"
 	"strings"
 
-	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
@@ -16,14 +16,14 @@ import (
 
 const (
 	Schema        = "tt"
-	Version       = Version1
 	Version0 byte = 0
 	Version1 byte = 1
+	Version2 byte = 2
 )
 
 func IsValidVersion(version byte) bool {
 	switch version {
-	case Version0, Version1:
+	case Version0, Version1, Version2:
 		return true
 	default:
 		return false
@@ -45,6 +45,7 @@ const (
 	TagClientRandomPrefix uint64 = 0x0B // Naive and ridiculous design.
 	TagName               uint64 = 0x0C
 	TagDNSUpstreams       uint64 = 0x0D
+	TagSubscriptionURL    uint64 = 0x0E
 )
 
 type UpstreamProtocol byte
@@ -64,6 +65,7 @@ func (u UpstreamProtocol) IsValid() bool {
 }
 
 type URL struct {
+	Version            byte
 	Hostname           string
 	Addresses          []M.Socksaddr
 	CustomSNI          string
@@ -76,6 +78,7 @@ type URL struct {
 	ClientRandomPrefix string
 	Name               string
 	DNSUpstreams       []string
+	SubscriptionURL    string
 }
 
 func Parse(link string) (*URL, error) {
@@ -135,6 +138,7 @@ func parseTag(buffer *buf.Buffer, url *URL, tag uint64) error {
 		if !IsValidVersion(version) {
 			return E.New("unexpected version: ", version)
 		}
+		url.Version = version
 	case TagHostname:
 		value, err := readTLVString(buffer, tag)
 		if err != nil {
@@ -215,6 +219,12 @@ func parseTag(buffer *buf.Buffer, url *URL, tag uint64) error {
 			return err
 		}
 		url.DNSUpstreams = value
+	case TagSubscriptionURL:
+		value, err := readTLVString(buffer, tag)
+		if err != nil {
+			return err
+		}
+		url.SubscriptionURL = value
 	case TagHasIPv6:
 		fallthrough
 	default:
@@ -329,27 +339,48 @@ func (u *URL) applyDefaults() {
 }
 
 func (u URL) requireValid() error {
-	if u.Hostname == "" {
-		return E.New("missing hostname")
+	if !IsValidVersion(u.Version) {
+		return E.New("unexpected version: ", u.Version)
 	}
-	if len(u.Addresses) == 0 {
-		return E.New("missing addresses")
+	if u.SubscriptionURL != "" {
+		if !strings.HasPrefix(u.SubscriptionURL, "https://") {
+			return E.New("subscription URL must start with https://")
+		}
+	} else {
+		if u.Hostname == "" {
+			return E.New("missing hostname")
+		}
+		if u.Username == "" {
+			return E.New("missing username")
+		}
+		if u.Password == "" {
+			return E.New("missing password")
+		}
+		if len(u.Addresses) == 0 {
+			return E.New("missing addresses")
+		}
 	}
-	if invalidIndex := common.Index(u.Addresses, func(it M.Socksaddr) bool {
-		return !it.IsValid() || it.Port == 0
+	if invalidIndex := slices.IndexFunc(u.Addresses, func(address M.Socksaddr) bool {
+		return !address.IsValid() || address.Port == 0
 	}); invalidIndex >= 0 {
 		return E.New("address [", invalidIndex, "] is invalid")
-	}
-	if u.Username == "" {
-		return E.New("missing username")
-	}
-	if u.Password == "" {
-		return E.New("missing password")
 	}
 	if !u.UpstreamProtocol.IsValid() {
 		return E.New("invalid upstream protocol ", byte(u.UpstreamProtocol))
 	}
 	return nil
+}
+
+// requiredVersion returns the lowest format version that can represent every field in use.
+func (u URL) requiredVersion() byte {
+	if u.SubscriptionURL != "" {
+		return Version2
+	}
+	/*if u.Name != "" || len(u.DNSUpstreams) > 0 {
+		return Version1
+	}
+	return Version0*/
+	return Version1
 }
 
 func (u URL) Build() (string, error) {
@@ -359,13 +390,15 @@ func (u URL) Build() (string, error) {
 		return "", err
 	}
 	builder := bytes.NewBuffer(nil)
-	err = writeTLV(builder, TagVersion, Version)
+	err = writeTLV(builder, TagVersion, max(u.Version, u.requiredVersion()))
 	if err != nil {
 		return "", E.Cause(err, "write version")
 	}
-	err = writeTLV(builder, TagHostname, u.Hostname)
-	if err != nil {
-		return "", E.Cause(err, "write hostname")
+	if u.Hostname != "" {
+		err = writeTLV(builder, TagHostname, u.Hostname)
+		if err != nil {
+			return "", E.Cause(err, "write hostname")
+		}
 	}
 	for i, address := range u.Addresses {
 		err = writeTLV(builder, TagAddresses, address.String())
@@ -379,13 +412,17 @@ func (u URL) Build() (string, error) {
 			return "", E.Cause(err, "write custom sni")
 		}
 	}
-	err = writeTLV(builder, TagUsername, u.Username)
-	if err != nil {
-		return "", E.Cause(err, "write username")
+	if u.Username != "" {
+		err = writeTLV(builder, TagUsername, u.Username)
+		if err != nil {
+			return "", E.Cause(err, "write username")
+		}
 	}
-	err = writeTLV(builder, TagPassword, u.Password)
-	if err != nil {
-		return "", E.Cause(err, "write password")
+	if u.Password != "" {
+		err = writeTLV(builder, TagPassword, u.Password)
+		if err != nil {
+			return "", E.Cause(err, "write password")
+		}
 	}
 	if u.ClientRandomPrefix != "" {
 		err = writeTLV(builder, TagClientRandomPrefix, u.ClientRandomPrefix)
@@ -427,6 +464,12 @@ func (u URL) Build() (string, error) {
 		err = writeTLV(builder, TagDNSUpstreams, u.DNSUpstreams)
 		if err != nil {
 			return "", E.Cause(err, "write dns upstreams")
+		}
+	}
+	if u.SubscriptionURL != "" {
+		err = writeTLV(builder, TagSubscriptionURL, u.SubscriptionURL)
+		if err != nil {
+			return "", E.Cause(err, "write subscription url")
 		}
 	}
 

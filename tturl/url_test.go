@@ -170,7 +170,7 @@ func TestRoundTrip_IPv6Addresses(t *testing.T) {
 func TestParse_DefaultUpstreamProtocolHTTP2(t *testing.T) {
 	t.Parallel()
 	builder := bytes.NewBuffer(nil)
-	common.Must(writeTLV(builder, TagVersion, Version))
+	common.Must(writeTLV(builder, TagVersion, Version1))
 	common.Must(writeTLV(builder, TagHostname, "example.com"))
 	common.Must(writeTLV(builder, TagAddresses, "1.2.3.4:443"))
 	common.Must(writeTLV(builder, TagUsername, "user"))
@@ -207,6 +207,7 @@ func TestParse_AcceptsSupportedVersions(t *testing.T) {
 	}{
 		{name: "version 0", version: Version0},
 		{name: "version 1", version: Version1},
+		{name: "version 2", version: Version2},
 	}
 
 	for _, testCase := range testCases {
@@ -233,7 +234,7 @@ func TestParse_AcceptsSupportedVersions(t *testing.T) {
 func TestParse_IgnoreUnknownTag(t *testing.T) {
 	t.Parallel()
 	builder := bytes.NewBuffer(nil)
-	common.Must(writeTLV(builder, TagVersion, Version))
+	common.Must(writeTLV(builder, TagVersion, Version1))
 	common.Must(writeTLV(builder, TagHostname, "example.com"))
 	common.Must(writeTLV(builder, TagAddresses, "1.2.3.4:443"))
 	common.Must(writeTLV(builder, TagUsername, "user"))
@@ -379,7 +380,7 @@ func TestBuild_DNSUpstreamsEncodedAsSingleStringArrayTLV(t *testing.T) {
 func TestParse_DNSUpstreamsFromSingleStringArrayTLV(t *testing.T) {
 	t.Parallel()
 	builder := bytes.NewBuffer(nil)
-	common.Must(writeTLV(builder, TagVersion, Version))
+	common.Must(writeTLV(builder, TagVersion, Version1))
 	common.Must(writeTLV(builder, TagHostname, "vpn.example.com"))
 	common.Must(writeTLV(builder, TagAddresses, "1.2.3.4:443"))
 	common.Must(writeTLV(builder, TagUsername, "user"))
@@ -585,6 +586,21 @@ func TestBuild_ValidationErrors(t *testing.T) {
 			url:     URL{Hostname: "example.com", Addresses: []M.Socksaddr{addr}, Username: "user", Password: "pass", UpstreamProtocol: 0xFF},
 			wantErr: "invalid upstream protocol",
 		},
+		{
+			name:    "unsupported version",
+			url:     URL{Version: 3, Hostname: "example.com", Addresses: []M.Socksaddr{addr}, Username: "user", Password: "pass"},
+			wantErr: "unexpected version: 3",
+		},
+		{
+			name:    "non-https subscription url",
+			url:     URL{SubscriptionURL: "http://vpn.example.com/subscription"},
+			wantErr: "subscription URL must start with https://",
+		},
+		{
+			name:    "non-https subscription url with static fields",
+			url:     URL{Hostname: "vpn.example.com", Addresses: []M.Socksaddr{addr}, Username: "alice", Password: "s3cret", SubscriptionURL: "http://vpn.example.com/subscription"},
+			wantErr: "subscription URL must start with https://",
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -606,7 +622,7 @@ func TestParse_ErrorCases(t *testing.T) {
 		}
 		return Schema + "://?" + base64.RawURLEncoding.EncodeToString(b.Bytes())
 	}
-	withVersion := func(b *bytes.Buffer) { common.Must(writeTLV(b, TagVersion, Version)) }
+	withVersion := func(b *bytes.Buffer) { common.Must(writeTLV(b, TagVersion, Version1)) }
 	withHostname := func(b *bytes.Buffer) { common.Must(writeTLV(b, TagHostname, "example.com")) }
 	withAddress := func(b *bytes.Buffer) { common.Must(writeTLV(b, TagAddresses, "1.2.3.4:443")) }
 	withUsername := func(b *bytes.Buffer) { common.Must(writeTLV(b, TagUsername, "user")) }
@@ -652,6 +668,20 @@ func TestParse_ErrorCases(t *testing.T) {
 			wantErr: "invalid upstream protocol",
 		},
 		{
+			name: "non-https subscription url",
+			link: buildLink(func(b *bytes.Buffer) { common.Must(writeTLV(b, TagVersion, Version2)) }, func(b *bytes.Buffer) {
+				common.Must(writeTLV(b, TagSubscriptionURL, "http://vpn.example.com/subscription"))
+			}),
+			wantErr: "subscription URL must start with https://",
+		},
+		{
+			name: "unsupported version 3",
+			link: buildLink(func(b *bytes.Buffer) { common.Must(writeTLV(b, TagVersion, byte(3))) }, func(b *bytes.Buffer) {
+				common.Must(writeTLV(b, TagSubscriptionURL, "https://vpn.example.com/subscription"))
+			}),
+			wantErr: "unexpected version: 3",
+		},
+		{
 			name:    "invalid base64",
 			link:    Schema + "://?not!valid!base64!!",
 			wantErr: "",
@@ -677,7 +707,8 @@ func TestIsValidVersion(t *testing.T) {
 	}{
 		{Version0, true},
 		{Version1, true},
-		{2, false},
+		{Version2, true},
+		{3, false},
 		{0xFF, false},
 	}
 	for _, tc := range testCases {
@@ -711,6 +742,134 @@ func TestParse_TruncatedVarint(t *testing.T) {
 	t.Parallel()
 	_, err := Parse(Schema + "://?" + base64.RawURLEncoding.EncodeToString([]byte{0x80, 0x00}))
 	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
+const testSubscriptionURL = "https://alice:s3cret@vpn.example.com/subscription"
+
+func TestBuild_VersionRaisedByFeatures(t *testing.T) {
+	t.Parallel()
+	addr := M.Socksaddr{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}
+	base := URL{Hostname: "vpn.example.com", Addresses: []M.Socksaddr{addr}, Username: "alice", Password: "s3cret"}
+	testCases := []struct {
+		name    string
+		modify  func(*URL)
+		version byte
+	}{
+		{name: "draft fields only", modify: func(*URL) {}, version: Version1},
+		{name: "name", modify: func(u *URL) { u.Name = "Acme VPN" }, version: Version1},
+		{name: "dns upstreams", modify: func(u *URL) { u.DNSUpstreams = []string{"1.1.1.1"} }, version: Version1},
+		{name: "subscription url", modify: func(u *URL) { u.SubscriptionURL = testSubscriptionURL }, version: Version2},
+		{name: "subscription url with name", modify: func(u *URL) { u.Name = "Acme VPN"; u.SubscriptionURL = testSubscriptionURL }, version: Version2},
+		{name: "explicit version kept", modify: func(u *URL) { u.Version = Version2 }, version: Version2},
+		{name: "explicit version raised", modify: func(u *URL) { u.Version = Version1; u.SubscriptionURL = testSubscriptionURL }, version: Version2},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			url := base
+			tc.modify(&url)
+			link, err := url.Build()
+			require.NoError(t, err)
+			require.Equal(t, [][]byte{{tc.version}}, decodeTLVValues(t, decodeTLVPayload(t, link), TagVersion))
+
+			parsed, err := Parse(link)
+			require.NoError(t, err)
+			require.Equal(t, tc.version, parsed.Version)
+		})
+	}
+}
+
+func TestParse_SubscriptionOnlyV2(t *testing.T) {
+	t.Parallel()
+	builder := bytes.NewBuffer(nil)
+	common.Must(writeTLV(builder, TagVersion, Version2))
+	common.Must(writeTLV(builder, TagSubscriptionURL, testSubscriptionURL))
+
+	parsed, err := Parse(Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes()))
+	require.NoError(t, err)
+	require.Equal(t, testSubscriptionURL, parsed.SubscriptionURL)
+	require.Empty(t, parsed.Hostname)
+	require.Empty(t, parsed.Addresses)
+	require.Empty(t, parsed.Username)
+	require.Empty(t, parsed.Password)
+}
+
+func TestParse_V1LinkWithRequiredFieldsAccepted(t *testing.T) {
+	t.Parallel()
+	builder := bytes.NewBuffer(nil)
+	common.Must(writeTLV(builder, TagVersion, Version1))
+	common.Must(writeTLV(builder, TagHostname, "vpn.example.com"))
+	common.Must(writeTLV(builder, TagAddresses, "1.2.3.4:443"))
+	common.Must(writeTLV(builder, TagUsername, "alice"))
+	common.Must(writeTLV(builder, TagPassword, "s3cret"))
+
+	parsed, err := Parse(Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes()))
+	require.NoError(t, err)
+	require.Equal(t, "vpn.example.com", parsed.Hostname)
+	require.Empty(t, parsed.SubscriptionURL)
+}
+
+func TestBuild_SubscriptionOnly(t *testing.T) {
+	t.Parallel()
+	url := URL{SubscriptionURL: testSubscriptionURL}
+	link, err := url.Build()
+	require.NoError(t, err)
+
+	payload := decodeTLVPayload(t, link)
+	// Version-2 TLV (tag 0x00, len 1, value 2) comes first.
+	require.Equal(t, []byte{0x00, 0x01, 0x02}, payload[:3])
+	// The whole payload is exactly these two TLVs; anything appended
+	// afterwards (e.g. a new default-emitted field) fails here.
+	require.Equal(t, []uint64{TagVersion, TagSubscriptionURL}, decodeTLVTags(t, link))
+
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+	require.Equal(t, testSubscriptionURL, parsed.SubscriptionURL)
+	require.Empty(t, parsed.Hostname)
+}
+
+func TestRoundTrip_FullConfigWithSubscriptionURL(t *testing.T) {
+	t.Parallel()
+	original := URL{
+		Hostname:        "vpn.example.com",
+		Addresses:       []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+		Username:        "alice",
+		Password:        "s3cret",
+		Name:            "Acme VPN",
+		DNSUpstreams:    []string{"tls://1.1.1.1"},
+		SubscriptionURL: testSubscriptionURL,
+	}
+
+	link, err := original.Build()
+	require.NoError(t, err)
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+
+	// Subscription URL and all static fallback fields survive the roundtrip.
+	expected := original
+	expected.Version = Version2
+	expected.UpstreamProtocol = UpstreamProtocolHTTP2
+	require.Equal(t, &expected, parsed)
+}
+
+func TestRoundTrip_SubscriptionOnly(t *testing.T) {
+	t.Parallel()
+	original := URL{SubscriptionURL: testSubscriptionURL}
+
+	link, err := original.Build()
+	require.NoError(t, err)
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+
+	require.Equal(t, testSubscriptionURL, parsed.SubscriptionURL)
+	require.Empty(t, parsed.Hostname)
+	require.Empty(t, parsed.Addresses)
+	require.Empty(t, parsed.Username)
+	require.Empty(t, parsed.Password)
+	require.Empty(t, parsed.Name)
+	require.Empty(t, parsed.DNSUpstreams)
+	// Defaults still apply.
+	require.EqualValues(t, UpstreamProtocolHTTP2, parsed.UpstreamProtocol)
 }
 
 func BenchmarkBuild(b *testing.B) {
