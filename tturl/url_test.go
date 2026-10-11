@@ -53,7 +53,7 @@ func TestRoundTrip_MaximalConfig(t *testing.T) {
 		CustomSNI:          "cdn.example.org",
 		Username:           "premium_user",
 		Password:           "very_secret_password_123",
-		ClientRandomPrefix: "aabbcc",
+		ClientRandomPrefix: ClientRandomPrefix{Prefix: []byte{0xaa, 0xbb, 0xcc}},
 		SkipVerification:   true,
 		Certificate:        []byte{0x30, 0x82, 0x01, 0x23},
 		UpstreamProtocol:   UpstreamProtocolHTTP3,
@@ -968,7 +968,6 @@ func TestRoundTrip_EmptyPrefixAndAuthKeyOmitted(t *testing.T) {
 		Addresses:           []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
 		Username:            "alice",
 		Password:            "secret",
-		ClientRandomPrefix:  "",
 		ClientRandomAuthKey: []byte{},
 	}
 
@@ -1011,7 +1010,7 @@ func BenchmarkBuild(b *testing.B) {
 		Certificate:        make([]byte, 1024),
 		UpstreamProtocol:   UpstreamProtocolHTTP3,
 		AntiDPI:            true,
-		ClientRandomPrefix: "prefix",
+		ClientRandomPrefix: ClientRandomPrefix{Prefix: []byte{0xaa, 0xbb, 0xcc}},
 		Name:               "name",
 		DNSUpstreams:       []string{"1.1.1.1", "tls://dns.example.com"},
 	}

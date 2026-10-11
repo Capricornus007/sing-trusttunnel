@@ -77,7 +77,7 @@ type URL struct {
 	Certificate         []byte // der
 	UpstreamProtocol    UpstreamProtocol
 	AntiDPI             bool
-	ClientRandomPrefix  string
+	ClientRandomPrefix  ClientRandomPrefix
 	Name                string
 	DNSUpstreams        []string
 	SubscriptionURL     string
@@ -209,7 +209,11 @@ func parseTag(buffer *buf.Buffer, url *URL, tag uint64) error {
 		if err != nil {
 			return err
 		}
-		url.ClientRandomPrefix = value
+		randomPrefix, err := ParseClientRandomPrefix(value)
+		if err != nil {
+			return err
+		}
+		url.ClientRandomPrefix = randomPrefix
 	case TagName:
 		value, err := readTLVString(buffer, tag)
 		if err != nil {
@@ -436,8 +440,8 @@ func (u URL) Build() (string, error) {
 			return "", E.Cause(err, "write password")
 		}
 	}
-	if u.ClientRandomPrefix != "" {
-		err = writeTLV(builder, TagClientRandomPrefix, u.ClientRandomPrefix)
+	if !u.ClientRandomPrefix.IsEmpty() {
+		err = writeTLV(builder, TagClientRandomPrefix, u.ClientRandomPrefix.String())
 		if err != nil {
 			return "", E.Cause(err, "write client random prefix")
 		}
