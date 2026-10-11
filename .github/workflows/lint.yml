@@ -44,10 +44,10 @@ jobs:
       # 不能用 golangci-lint-action / go install：它釘 x/tools v0.50.0，讀不了 go tip 的
       # std export data（實測 v0.50 ✗、v0.51 ✓、v0.52 ✓）→ Lint 必紅。換依賴重 build
       # 的步驟與交叉表在 feed 倉 .github/actions/setup-gcl。
-      - name: Install golangci-lint v2.13.1 (with x/tools that reads Go tip)
+      - name: Install golangci-lint v2.14.0 (with x/tools that reads Go tip)
         uses: Capricornus007/repo/.github/actions/setup-gcl@master
         with:
-          version: v2.13.1
+          version: v2.14.0
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
       - name: Run golangci-lint
