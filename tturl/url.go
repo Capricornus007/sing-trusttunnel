@@ -4,6 +4,7 @@ package tturl
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/hex"
 	"io"
 	"slices"
 	"strings"
@@ -31,21 +32,22 @@ func IsValidVersion(version byte) bool {
 }
 
 const (
-	TagVersion            uint64 = 0x00
-	TagHostname           uint64 = 0x01
-	TagAddresses          uint64 = 0x02
-	TagCustomSNI          uint64 = 0x03
-	TagHasIPv6            uint64 = 0x04 // Always true in original implementation
-	TagUsername           uint64 = 0x05
-	TagPassword           uint64 = 0x06
-	TagSkipVerification   uint64 = 0x07
-	TagCertificate        uint64 = 0x08
-	TagUpstreamProtocol   uint64 = 0x09
-	TagAntiDPI            uint64 = 0x0A
-	TagClientRandomPrefix uint64 = 0x0B // Naive and ridiculous design.
-	TagName               uint64 = 0x0C
-	TagDNSUpstreams       uint64 = 0x0D
-	TagSubscriptionURL    uint64 = 0x0E
+	TagVersion             uint64 = 0x00
+	TagHostname            uint64 = 0x01
+	TagAddresses           uint64 = 0x02
+	TagCustomSNI           uint64 = 0x03
+	TagHasIPv6             uint64 = 0x04 // Always true in original implementation
+	TagUsername            uint64 = 0x05
+	TagPassword            uint64 = 0x06
+	TagSkipVerification    uint64 = 0x07
+	TagCertificate         uint64 = 0x08
+	TagUpstreamProtocol    uint64 = 0x09
+	TagAntiDPI             uint64 = 0x0A
+	TagClientRandomPrefix  uint64 = 0x0B
+	TagName                uint64 = 0x0C
+	TagDNSUpstreams        uint64 = 0x0D
+	TagSubscriptionURL     uint64 = 0x0E
+	TagClientRandomAuthKey uint64 = 0x0F
 )
 
 type UpstreamProtocol byte
@@ -65,20 +67,21 @@ func (u UpstreamProtocol) IsValid() bool {
 }
 
 type URL struct {
-	Version            byte
-	Hostname           string
-	Addresses          []M.Socksaddr
-	CustomSNI          string
-	Username           string
-	Password           string
-	SkipVerification   bool
-	Certificate        []byte // der
-	UpstreamProtocol   UpstreamProtocol
-	AntiDPI            bool
-	ClientRandomPrefix string
-	Name               string
-	DNSUpstreams       []string
-	SubscriptionURL    string
+	Version             byte
+	Hostname            string
+	Addresses           []M.Socksaddr
+	CustomSNI           string
+	Username            string
+	Password            string
+	SkipVerification    bool
+	Certificate         []byte // der
+	UpstreamProtocol    UpstreamProtocol
+	AntiDPI             bool
+	ClientRandomPrefix  string
+	Name                string
+	DNSUpstreams        []string
+	SubscriptionURL     string
+	ClientRandomAuthKey []byte // will be encoded to hex
 }
 
 func Parse(link string) (*URL, error) {
@@ -225,6 +228,16 @@ func parseTag(buffer *buf.Buffer, url *URL, tag uint64) error {
 			return err
 		}
 		url.SubscriptionURL = value
+	case TagClientRandomAuthKey:
+		rawValue, err := readTLVString(buffer, tag)
+		if err != nil {
+			return err
+		}
+		value, err := hex.DecodeString(rawValue)
+		if err != nil {
+			return E.Cause(err, "client random auth key is not hex")
+		}
+		url.ClientRandomAuthKey = value
 	case TagHasIPv6:
 		fallthrough
 	default:
@@ -371,9 +384,8 @@ func (u URL) requireValid() error {
 	return nil
 }
 
-// requiredVersion returns the lowest format version that can represent every field in use.
-func (u URL) requiredVersion() byte {
-	if u.SubscriptionURL != "" {
+func (u URL) lowestVersion() byte {
+	if u.SubscriptionURL != "" || len(u.ClientRandomAuthKey) > 0 {
 		return Version2
 	}
 	/*if u.Name != "" || len(u.DNSUpstreams) > 0 {
@@ -390,7 +402,7 @@ func (u URL) Build() (string, error) {
 		return "", err
 	}
 	builder := bytes.NewBuffer(nil)
-	err = writeTLV(builder, TagVersion, max(u.Version, u.requiredVersion()))
+	err = writeTLV(builder, TagVersion, max(u.Version, u.lowestVersion()))
 	if err != nil {
 		return "", E.Cause(err, "write version")
 	}
@@ -470,6 +482,12 @@ func (u URL) Build() (string, error) {
 		err = writeTLV(builder, TagSubscriptionURL, u.SubscriptionURL)
 		if err != nil {
 			return "", E.Cause(err, "write subscription url")
+		}
+	}
+	if len(u.ClientRandomAuthKey) > 0 {
+		err = writeTLV(builder, TagClientRandomAuthKey, hex.EncodeToString(u.ClientRandomAuthKey))
+		if err != nil {
+			return "", E.Cause(err, "write client random auth key")
 		}
 	}
 
