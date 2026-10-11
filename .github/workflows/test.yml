@@ -11,7 +11,9 @@ on:
 
 jobs:
   build:
-    name: ${{ matrix.os-name }} (Go ${{ matrix.go-version }})
+    # Go 改吃 feed 的 go-git（golang/go master tip），原本 name 裡的「(Go x.y.z)」
+    # 不再有資料來源，改成只標平台。
+    name: Linux
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -19,26 +21,19 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-          - macos-latest
-          - windows-latest
-        go-version:
-          - '1.27.1'
-        include:
-          - os: ubuntu-latest
-            os-name: Linux
-          - os: macos-latest
-            os-name: macOS
-          - os: windows-latest
-            os-name: Windows
+          # 用戶 2026-10-11 裁：其他系統整條刪（macos-latest / windows-latest 已移除）。
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Setup Go
-        uses: actions/setup-go@v7
+      - name: Install Go from the feed (golang/go master tip)
+        uses: Capricornus007/repo/.github/actions/setup-feed-go@master
+      # 原本那步 Go 安裝順帶開了 module 快取（依 go.sum）；composite 不管快取 → 顯式補一步。
+      - name: Cache go module
+        uses: actions/cache@v6
         with:
-          cache: true
-          go-version: ${{ matrix.go-version }}
-          cache-dependency-path: 'go.sum'
+          path: |
+            ~/go/pkg/mod
+          key: go-${{ hashFiles('**/go.sum') }}
       - name: Build
         run: |
           make test

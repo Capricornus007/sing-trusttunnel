@@ -42,48 +42,29 @@ jobs:
             goarch: '386'
             goarm: ''
             ext: ''
-          - target: freebsd-amd64
-            goos: freebsd
-            goarch: amd64
-            goarm: ''
-            ext: ''
-          - target: darwin-amd64
-            goos: darwin
-            goarch: amd64
-            goarm: ''
-            ext: ''
-          - target: darwin-arm64
-            goos: darwin
-            goarch: arm64
-            goarm: ''
-            ext: ''
-          - target: windows-amd64
-            goos: windows
-            goarch: amd64
-            goarm: ''
-            ext: .exe
-          - target: windows-arm64
-            goos: windows
-            goarch: arm64
-            goarm: ''
-            ext: .exe
-          - target: windows-386
-            goos: windows
-            goarch: '386'
-            goarm: ''
-            ext: .exe
+          # 用戶 2026-10-11 裁：其他系統整條刪。
+          # 移除 freebsd-amd64、darwin-amd64、darwin-arm64、
+          # windows-amd64、windows-arm64、windows-386 六條交叉編譯目標
+          # （只有原 windows 條目的 ext 是 .exe，剩下的 ext 全為空字串，
+          #  Build 步的 ${{ matrix.ext }} 照原樣保留、不改腳本）。
+          # Publish job 用 download-artifact 的 merge-multiple 收全部產物，
+          # 沒有逐目標的引用需要清；needs: build 的 build job 仍存在。
+          # 未擅自補 android 目標（那是用戶真正要發的包的平台，怎麼建請主代理裁）。
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
-      - name: Setup Go
-        uses: actions/setup-go@v7
+      - name: Install Go from the feed (golang/go master tip)
+        uses: Capricornus007/repo/.github/actions/setup-feed-go@master
+      # 原本那步 Go 安裝順帶開了 module 快取（依 go.sum）與 check-latest；
+      # 版本現在由 feed 決定，check-latest 無意義；composite 不管快取 → 顯式補一步。
+      - name: Cache go module
+        uses: actions/cache@v6
         with:
-          cache: true
-          check-latest: true
-          go-version: "1.27.1"
-          cache-dependency-path: 'go.sum'
+          path: |
+            ~/go/pkg/mod
+          key: go-${{ hashFiles('**/go.sum') }}
       - name: Build
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}

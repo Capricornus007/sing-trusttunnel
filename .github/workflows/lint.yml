@@ -17,12 +17,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - goos: windows
-            goarch: amd64
-          - goos: windows
-            goarch: '386'
-          - goos: windows
-            goarch: arm64
           - goos: linux
             goarch: amd64
           - goos: linux
@@ -31,29 +25,33 @@ jobs:
             goarch: arm
           - goos: linux
             goarch: '386'
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
+          # 用戶 2026-10-11 裁：非 Linux/Android 的矩陣目標整條刪
+          # （windows amd64/386/arm64、darwin amd64/arm64、freebsd amd64 已移除）。
           - goos: android
             goarch: arm64
-          - goos: freebsd
-            goarch: amd64
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Setup Go
-        uses: actions/setup-go@v7
+      - name: Install Go from the feed (golang/go master tip)
+        uses: Capricornus007/repo/.github/actions/setup-feed-go@master
+      # 原本那步 Go 安裝順帶開了 module 快取（依 go.sum）；composite 不管快取 → 顯式補一步。
+      - name: Cache go module
+        uses: actions/cache@v6
         with:
-          cache: true
-          go-version: "1.27.1"
-          cache-dependency-path: 'go.sum'
-      - name: Build golangci-lint from source
-        run: |
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
+          path: |
+            ~/go/pkg/mod
+          key: go-${{ hashFiles('**/go.sum') }}
+      # 不能用 golangci-lint-action / go install：它釘 x/tools v0.50.0，讀不了 go tip 的
+      # std export data（實測 v0.50 ✗、v0.51 ✓、v0.52 ✓）→ Lint 必紅。換依賴重 build
+      # 的步驟與交叉表在 feed 倉 .github/actions/setup-gcl。
+      - name: Install golangci-lint v2.13.1 (with x/tools that reads Go tip)
+        uses: Capricornus007/repo/.github/actions/setup-gcl@master
+        with:
+          version: v2.13.1
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
       - name: Run golangci-lint
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: |
-          $(go env GOPATH)/bin/golangci-lint run --timeout=30m
+        run: golangci-lint run --timeout=30m
