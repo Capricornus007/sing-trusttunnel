@@ -20,7 +20,6 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/ntp"
 	"github.com/sagernet/sing/common/tls"
-	sHTTP "github.com/sagernet/sing/protocol/http"
 )
 
 type HandlerEx interface {
@@ -172,8 +171,7 @@ func (s *Service) shutdownServers() error {
 }
 
 func (s *Service) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	authorization := request.Header.Get("Proxy-Authorization")
-	username, loaded := s.verify(authorization)
+	username, loaded := s.verify(request)
 	if !loaded {
 		// Though specification requires 407, this commit allow to use others.
 		// https://github.com/TrustTunnel/TrustTunnel/commit/1553e91f340ea884b4fcc775d46193aa9704b8e9
@@ -276,8 +274,8 @@ func (s *Service) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-func (s *Service) verify(authorization string) (username string, loaded bool) {
-	username, password, loaded := sHTTP.ParseBasicAuth(authorization)
+func (s *Service) verify(request *http.Request) (username string, loaded bool) {
+	username, password, loaded := request.BasicAuth()
 	if !loaded {
 		return "", false
 	}

@@ -3,7 +3,6 @@ package trusttunnel
 
 import (
 	"bytes"
-	"encoding/base64"
 	"io"
 	"net"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/sagernet/sing/common"
-	"github.com/sagernet/sing/common/auth"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 )
@@ -33,10 +31,6 @@ const (
 )
 
 var ErrQUICNotIncluded = E.New("QUIC is not included")
-
-func buildAuth(user auth.User) string {
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte(user.Username+":"+user.Password))
-}
 
 func parse16BytesIP(buffer [16]byte) netip.Addr {
 	var zeroPrefix [12]byte

@@ -3,6 +3,7 @@ package tturl
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/netip"
@@ -52,7 +53,7 @@ func TestRoundTrip_MaximalConfig(t *testing.T) {
 		CustomSNI:          "cdn.example.org",
 		Username:           "premium_user",
 		Password:           "very_secret_password_123",
-		ClientRandomPrefix: "aabbcc",
+		ClientRandomPrefix: ClientRandomPrefix{Prefix: []byte{0xaa, 0xbb, 0xcc}},
 		SkipVerification:   true,
 		Certificate:        []byte{0x30, 0x82, 0x01, 0x23},
 		UpstreamProtocol:   UpstreamProtocolHTTP3,
@@ -239,12 +240,14 @@ func TestParse_IgnoreUnknownTag(t *testing.T) {
 	common.Must(writeTLV(builder, TagAddresses, "1.2.3.4:443"))
 	common.Must(writeTLV(builder, TagUsername, "user"))
 	common.Must(writeTLV(builder, TagPassword, "pass"))
-	common.Must(writeTLV(builder, 0x0c, []byte{0x01, 0x02, 0x03}))
+	common.Must(writeTLV(builder, 0xFF, []byte{0x01, 0x02, 0x03}))
 
 	link := Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes())
 	parsed, err := Parse(link)
 	require.NoError(t, err)
 	require.Equal(t, "user", parsed.Username)
+	require.Empty(t, parsed.Name)
+	require.Empty(t, parsed.ClientRandomAuthKey)
 }
 
 func TestParse_InvalidScheme(t *testing.T) {
@@ -872,6 +875,130 @@ func TestRoundTrip_SubscriptionOnly(t *testing.T) {
 	require.EqualValues(t, UpstreamProtocolHTTP2, parsed.UpstreamProtocol)
 }
 
+func TestRoundTrip_ClientRandomAuthKey(t *testing.T) {
+	t.Parallel()
+	original := URL{
+		Hostname:            "vpn.example.com",
+		Addresses:           []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+		Username:            "alice",
+		Password:            "secret",
+		ClientRandomAuthKey: []byte{0xaa, 0xbb, 0xcc, 0xdd},
+	}
+
+	link, err := original.Build()
+	require.NoError(t, err)
+
+	payload := decodeTLVPayload(t, link)
+	require.Equal(t, [][]byte{[]byte("aabbccdd")}, decodeTLVValues(t, payload, TagClientRandomAuthKey))
+
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+	require.Equal(t, original.ClientRandomAuthKey, parsed.ClientRandomAuthKey)
+}
+
+func TestRoundTrip_ClientRandomAuthKeyLengths(t *testing.T) {
+	t.Parallel()
+	// Empty keys are omitted and decode as absent, so only non-empty keys
+	// (1 to 16 bytes, matching the upstream hex strategy) are round-tripped.
+	for length := 1; length <= 16; length++ {
+		t.Run(F.ToString(length), func(t *testing.T) {
+			t.Parallel()
+			key := bytes.Repeat([]byte{0xab}, length)
+			original := URL{
+				Hostname:            "vpn.example.com",
+				Addresses:           []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+				Username:            "alice",
+				Password:            "secret",
+				ClientRandomAuthKey: key,
+			}
+
+			link, err := original.Build()
+			require.NoError(t, err)
+			parsed, err := Parse(link)
+			require.NoError(t, err)
+			require.Equal(t, key, parsed.ClientRandomAuthKey)
+			require.Equal(t, [][]byte{[]byte(hex.EncodeToString(key))}, decodeTLVValues(t, decodeTLVPayload(t, link), TagClientRandomAuthKey))
+		})
+	}
+}
+
+func TestBuild_ClientRandomAuthKeyOmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+	original := URL{
+		Hostname:  "vpn.example.com",
+		Addresses: []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+		Username:  "alice",
+		Password:  "secret",
+	}
+
+	link, err := original.Build()
+	require.NoError(t, err)
+	assert.NotContains(t, decodeTLVTags(t, link), TagClientRandomAuthKey)
+
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+	require.Empty(t, parsed.ClientRandomAuthKey)
+}
+
+func TestParse_ClientRandomAuthKeyInvalidHex(t *testing.T) {
+	t.Parallel()
+	testCases := []string{"nothexx", "not-hex"}
+	for _, raw := range testCases {
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			builder := bytes.NewBuffer(nil)
+			common.Must(writeTLV(builder, TagVersion, Version1))
+			common.Must(writeTLV(builder, TagHostname, "vpn.example.com"))
+			common.Must(writeTLV(builder, TagAddresses, "1.2.3.4:443"))
+			common.Must(writeTLV(builder, TagUsername, "alice"))
+			common.Must(writeTLV(builder, TagPassword, "secret"))
+			common.Must(writeTLV(builder, TagClientRandomAuthKey, raw))
+
+			_, err := Parse(Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes()))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "client random auth key is not hex")
+		})
+	}
+}
+
+func TestRoundTrip_EmptyPrefixAndAuthKeyOmitted(t *testing.T) {
+	t.Parallel()
+	original := URL{
+		Hostname:            "vpn.example.com",
+		Addresses:           []M.Socksaddr{{Addr: netip.MustParseAddr("1.2.3.4"), Port: 443}},
+		Username:            "alice",
+		Password:            "secret",
+		ClientRandomAuthKey: []byte{},
+	}
+
+	link, err := original.Build()
+	require.NoError(t, err)
+	tags := decodeTLVTags(t, link)
+	// Empty prefix and auth key are skipped, so decode returns them empty.
+	assert.NotContains(t, tags, TagClientRandomPrefix)
+	assert.NotContains(t, tags, TagClientRandomAuthKey)
+
+	parsed, err := Parse(link)
+	require.NoError(t, err)
+	require.Empty(t, parsed.ClientRandomPrefix)
+	require.Empty(t, parsed.ClientRandomAuthKey)
+}
+
+func TestParse_ClientRandomAuthKeyEmptyIsAllowed(t *testing.T) {
+	t.Parallel()
+	builder := bytes.NewBuffer(nil)
+	common.Must(writeTLV(builder, TagVersion, Version1))
+	common.Must(writeTLV(builder, TagHostname, "vpn.example.com"))
+	common.Must(writeTLV(builder, TagAddresses, "1.2.3.4:443"))
+	common.Must(writeTLV(builder, TagUsername, "alice"))
+	common.Must(writeTLV(builder, TagPassword, "secret"))
+	common.Must(writeTLV(builder, TagClientRandomAuthKey, ""))
+
+	parsed, err := Parse(Schema + "://?" + base64.RawURLEncoding.EncodeToString(builder.Bytes()))
+	require.NoError(t, err)
+	require.Empty(t, parsed.ClientRandomAuthKey)
+}
+
 func BenchmarkBuild(b *testing.B) {
 	url := URL{
 		Hostname:           "vpn.example.com",
@@ -883,7 +1010,7 @@ func BenchmarkBuild(b *testing.B) {
 		Certificate:        make([]byte, 1024),
 		UpstreamProtocol:   UpstreamProtocolHTTP3,
 		AntiDPI:            true,
-		ClientRandomPrefix: "prefix",
+		ClientRandomPrefix: ClientRandomPrefix{Prefix: []byte{0xaa, 0xbb, 0xcc}},
 		Name:               "name",
 		DNSUpstreams:       []string{"1.1.1.1", "tls://dns.example.com"},
 	}
